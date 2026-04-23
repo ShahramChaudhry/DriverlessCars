@@ -23,11 +23,15 @@ from benchmark    import warmup_model, benchmark_video
 # ── Lazy model cache — prevents re-compiling across Gradio clicks ─────────────
 _model_cache: dict = {}
 
-def _get_model(mode: str):
-    if mode not in _model_cache:
-        print(f"[INFO] Loading model (mode={mode}) — compile time is excluded from metrics")
-        _model_cache[mode] = load_model(mode)
-    return _model_cache[mode]
+def _get_model(mode: str, weight: str):
+    key = f"{weight}::{mode}"
+    if key not in _model_cache:
+        print(
+            f"[INFO] Loading model (weight={weight}, mode={mode}) "
+            f"— compile time is excluded from metrics"
+        )
+        _model_cache[key] = load_model(mode, weight=weight)
+    return _model_cache[key]
 
 
 # ── Core demo function ────────────────────────────────────────────────────────
@@ -35,48 +39,73 @@ def run_demo(
     video_path: str | None,
     mode:       str,
     run_bench:  bool,
+    model_weight: str,
+    batch_size: int,
+    timing_scope: str,
     progress=gr.Progress(),
 ) -> tuple:
-    if video_path is None:
-        return None, {"error": "Please upload a video file first."}
+    try:
+        # Gradio sliders often pass numeric values as floats (e.g., 8.0)
+        batch_size = int(batch_size)
 
-    progress(0.05, desc="Loading / retrieving model ...")
-    bundle = _get_model(mode)
+        if video_path is None:
+            return None, {"error": "Please upload a video file first."}
 
-    progress(0.20, desc="Loading & preprocessing frames (letterbox → GPU tensors) ...")
-    raw_frames, tensors, shapes, ratios, pads, fps, orig_wh = load_video_frames(video_path)
+        progress(0.05, desc="Loading / retrieving model ...")
+        bundle = _get_model(mode, model_weight)
 
-    if not tensors:
-        return None, {"error": "Could not read any frames from the video."}
+        progress(0.20, desc="Loading & preprocessing frames (letterbox → GPU tensors) ...")
+        raw_frames, tensors, shapes, ratios, pads, fps, orig_wh = load_video_frames(video_path)
 
-    n_warmup = min(WARMUP_FRAMES, len(tensors))
-    progress(0.40, desc=f"Warming up ({n_warmup} frames, not timed) ...")
-    warmup_model(bundle, tensors)
+        if not tensors:
+            return None, {"error": "Could not read any frames from the video."}
 
-    metrics: dict = {"mode": mode, "device": str(DEVICE), "num_frames": len(tensors)}
-
-    if run_bench:
-        progress(0.55, desc=f"Benchmarking ({BENCHMARK_REPEATS} timed runs, first discarded) ...")
-        metrics = benchmark_video(bundle, tensors)
-        metrics["benchmark_note"] = (
-            "Timing scope: nn-forward + NMS only. "
-            f"Preprocessing excluded (pre-loaded to GPU). "
-            f"Warmup: {n_warmup} frames. "
-            "First timed run discarded (mirrors ResNet benchmark)."
+        n_warmup = min(WARMUP_FRAMES, len(tensors))
+        progress(0.40, desc=f"Warming up ({n_warmup} frames, not timed) ...")
+        warmup_model(
+            bundle,
+            tensors,
+            warmup_frames=WARMUP_FRAMES,
+            batch_size=batch_size,
+            timing_scope=timing_scope,
         )
 
-    progress(0.80, desc="Running annotated inference pass ...")
-    annotated = run_video_inference(bundle, raw_frames, tensors, shapes, ratios, pads)
+        metrics: dict = {"mode": mode, "device": str(DEVICE), "num_frames": len(tensors)}
 
-    progress(0.93, desc="Saving output video ...")
-    out_path = tempfile.mktemp(suffix=".mp4")
-    save_video(annotated, out_path, fps)
+        if run_bench:
+            progress(0.55, desc=f"Benchmarking ({BENCHMARK_REPEATS} timed runs, first discarded) ...")
+            metrics = benchmark_video(
+                bundle,
+                tensors,
+                repeats=BENCHMARK_REPEATS,
+                batch_size=batch_size,
+                timing_scope=timing_scope,
+            )
+            metrics["benchmark_note"] = (
+                f"Timing scope: {timing_scope}. "
+                f"Preprocessing excluded (pre-loaded to GPU). "
+                f"Warmup: {n_warmup} frames. "
+                "First timed run discarded (mirrors ResNet benchmark)."
+            )
+            metrics["model_weight"] = model_weight
 
-    if not run_bench:
-        metrics["note"] = "Enable 'Run benchmark' to get per-frame timing metrics."
+        progress(0.80, desc="Running annotated inference pass ...")
+        annotated = run_video_inference(bundle, raw_frames, tensors, shapes, ratios, pads)
 
-    progress(1.0, desc="Done!")
-    return out_path, metrics
+        progress(0.93, desc="Saving output video ...")
+        out_path = tempfile.mktemp(suffix=".mp4")
+        save_video(annotated, out_path, fps)
+
+        if not run_bench:
+            metrics["note"] = "Enable 'Run benchmark' to get per-frame timing metrics."
+
+        progress(1.0, desc="Done!")
+        return out_path, metrics
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        return None, {"error": str(e)}
 
 
 # ── Side-by-side comparison ───────────────────────────────────────────────────
@@ -84,10 +113,14 @@ def compare_modes(
     video_path: str | None,
     mode_a:     str,
     mode_b:     str,
+    model_weight: str,
+    batch_size: int,
+    timing_scope: str,
     progress=gr.Progress(),
 ) -> tuple[dict, dict]:
     if video_path is None:
         return {"error": "Upload a video."}, {"error": "Upload a video."}
+    batch_size = int(batch_size)
 
     progress(0.05, desc="Loading & preprocessing video frames ...")
     _, tensors, *_ = load_video_frames(video_path)
@@ -95,9 +128,22 @@ def compare_modes(
     results: dict[str, dict] = {}
     for i, mode in enumerate([mode_a, mode_b]):
         progress(0.10 + i * 0.45, desc=f"Benchmarking mode: {mode} ...")
-        bundle = _get_model(mode)
-        warmup_model(bundle, tensors)
-        results[mode] = benchmark_video(bundle, tensors)
+        bundle = _get_model(mode, model_weight)
+        warmup_model(
+            bundle,
+            tensors,
+            warmup_frames=WARMUP_FRAMES,
+            batch_size=batch_size,
+            timing_scope=timing_scope,
+        )
+        results[mode] = benchmark_video(
+            bundle,
+            tensors,
+            repeats=BENCHMARK_REPEATS,
+            batch_size=batch_size,
+            timing_scope=timing_scope,
+        )
+        results[mode]["model_weight"] = model_weight
 
     return results[mode_a], results[mode_b]
 
@@ -144,10 +190,27 @@ with gr.Blocks(
             with gr.Row():
                 with gr.Column(scale=1):
                     vid_in   = gr.Video(label="Input Driving Video")
+                    model_sel = gr.Dropdown(
+                        choices=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"],
+                        value="yolov8n.pt",
+                        label="Model Weight",
+                    )
                     mode_sel = gr.Dropdown(
                         choices=list(OPTIMIZATION_MODES.keys()),
                         value="eager",
                         label="Optimisation Mode",
+                    )
+                    timing_sel = gr.Radio(
+                        choices=["forward", "forward+nms"],
+                        value="forward+nms",
+                        label="Benchmark Timing Scope",
+                    )
+                    batch_sel = gr.Slider(
+                        minimum=1,
+                        maximum=64,
+                        value=1,
+                        step=1,
+                        label="Batch size (frames per forward call)",
                     )
                     gr.Markdown(_mode_table)
                     bench_cb = gr.Checkbox(
@@ -162,7 +225,7 @@ with gr.Blocks(
 
             run_btn.click(
                 fn=run_demo,
-                inputs=[vid_in, mode_sel, bench_cb],
+                inputs=[vid_in, mode_sel, bench_cb, model_sel, batch_sel, timing_sel],
                 outputs=[vid_out, metrics_out],
             )
 
@@ -173,6 +236,23 @@ with gr.Blocks(
                 "and compare per-frame latency / FPS side-by-side."
             )
             cmp_vid = gr.Video(label="Input Video")
+            cmp_model = gr.Dropdown(
+                choices=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"],
+                value="yolov8n.pt",
+                label="Model Weight",
+            )
+            cmp_timing = gr.Radio(
+                choices=["forward", "forward+nms"],
+                value="forward+nms",
+                label="Benchmark Timing Scope",
+            )
+            cmp_batch = gr.Slider(
+                minimum=1,
+                maximum=64,
+                value=1,
+                step=1,
+                label="Batch size (frames per forward call)",
+            )
             with gr.Row():
                 cmp_a = gr.Dropdown(
                     choices=list(OPTIMIZATION_MODES.keys()),
@@ -191,7 +271,7 @@ with gr.Blocks(
 
             cmp_btn.click(
                 fn=compare_modes,
-                inputs=[cmp_vid, cmp_a, cmp_b],
+                inputs=[cmp_vid, cmp_a, cmp_b, cmp_model, cmp_batch, cmp_timing],
                 outputs=[cmp_out_a, cmp_out_b],
             )
 

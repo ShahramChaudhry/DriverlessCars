@@ -47,9 +47,10 @@ class ModelBundle:
     names:    dict
     use_amp:  bool
     stride:   int
+    weight:   str
 
 
-def load_model(mode: str = "eager") -> ModelBundle:
+def load_model(mode: str = "eager", weight: str | None = None) -> ModelBundle:
     """
     Load YOLOv8, apply the requested optimization, return a ModelBundle.
     torch.compile is called here so compile time is never counted in benchmarks.
@@ -58,8 +59,9 @@ def load_model(mode: str = "eager") -> ModelBundle:
         raise ValueError(f"Unknown mode '{mode}'. Choose from: {list(OPTIMIZATION_MODES)}")
 
     cfg = OPTIMIZATION_MODES[mode]
+    weight = weight or MODEL_WEIGHT
 
-    yolo     = YOLO(MODEL_WEIGHT)
+    yolo     = YOLO(weight)
     nn_model = yolo.model.to(DEVICE).eval()
     names    = yolo.names
     stride   = int(yolo.model.stride.max())
@@ -88,4 +90,5 @@ def load_model(mode: str = "eager") -> ModelBundle:
         names=names,
         use_amp=use_amp,
         stride=stride,
+        weight=weight,
     )

@@ -8,8 +8,7 @@ import urllib.request
 # Public test video from Google's open media bucket.
 # Replace with any front-camera .mp4 clip (BDD100K, nuScenes, dashcam footage, etc.)
 SAMPLE_URL = (
-    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/"
-    "SubaruOutbackOnStreetAndDirt.mp4"
+    "https://raw.githubusercontent.com/ultralytics/yolov5/master/data/videos/zidane.mp4"
 )
 OUT_DIR  = "sample_videos"
 OUT_FILE = os.path.join(OUT_DIR, "driving_sample.mp4")

@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# Large model weights (downloaded or exported)
+*.pt
+*.onnx
+*.engine
+*.mlpackage
+*.mlmodel
+
+# Python virtualenvs
+venv/
+.venv/
+
+# Gradio / temp artifacts
+*.mp4
+*.log
