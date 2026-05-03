@@ -18,13 +18,18 @@ import torch
 
 from config       import DEVICE, WARMUP_FRAMES, BENCHMARK_REPEATS, MAX_DEMO_FRAMES, CONF_THRESHOLD
 from model_loader import load_model, OPTIMIZATION_MODES
-
-
-def _mode_dropdown_choices() -> list[tuple[str, str]]:
-    """(Gradio label, registry key) — UI shows torch.compile() names; backend uses keys."""
-    return [(v["label"], k) for k, v in OPTIMIZATION_MODES.items()]
 from inference    import load_video_frames, run_video_inference, save_video
 from benchmark    import warmup_model, benchmark_video
+
+
+def _mode_radio_choices() -> list[tuple[str, str]]:
+    """(visible label, registry key) — four fixed modes: eager, torch_compile, amp, amp_compile."""
+    return [
+        ("Eager — FP32, no torch.compile", "eager"),
+        ("torch.compile() — FP32 (compiled YOLO, max-autotune-no-cudagraphs)", "torch_compile"),
+        ("AMP — FP16, no torch.compile", "amp"),
+        ("AMP + torch.compile() (max-autotune-no-cudagraphs)", "amp_compile"),
+    ]
 
 
 # ── Lazy model cache — prevents re-compiling across Gradio clicks ─────────────
@@ -162,9 +167,8 @@ def _device_label() -> str:
     return "CPU  (no CUDA GPU — compile modes and AMP fall back to eager / off)"
 
 
-_mode_table = (
-    "| Internal key | What you see in the menu |\n|---|---|\n"
-    + "\n".join(f"| `{k}` | {v['label']} |" for k, v in OPTIMIZATION_MODES.items())
+_mode_table = "| Mode key | Backend |\n|---|---|\n" + "\n".join(
+    f"| `{k}` | {v['label']} |" for k, v in OPTIMIZATION_MODES.items()
 )
 
 _bench_philosophy = (
@@ -203,10 +207,13 @@ with gr.Blocks(
                         value="yolov8n.pt",
                         label="Model Weight",
                     )
-                    mode_sel = gr.Dropdown(
-                        choices=_mode_dropdown_choices(),
+                    gr.Markdown(
+                        "**Pick one of four modes:** `eager` · `torch_compile` · `amp` · `amp_compile`"
+                    )
+                    mode_sel = gr.Radio(
+                        choices=_mode_radio_choices(),
                         value="eager",
-                        label="Optimisation mode (torch.compile() = compiled YOLO)",
+                        label="Optimisation mode",
                     )
                     timing_sel = gr.Radio(
                         choices=["forward", "forward+nms"],
@@ -262,14 +269,15 @@ with gr.Blocks(
                 label="Batch size (frames per forward call)",
             )
             with gr.Row():
-                cmp_a = gr.Dropdown(
-                    choices=_mode_dropdown_choices(),
+                gr.Markdown("**Mode A vs Mode B** — same four options as tab 1.")
+                cmp_a = gr.Radio(
+                    choices=_mode_radio_choices(),
                     value="eager",
                     label="Mode A",
                 )
-                cmp_b = gr.Dropdown(
-                    choices=_mode_dropdown_choices(),
-                    value="torch_compile_amp",
+                cmp_b = gr.Radio(
+                    choices=_mode_radio_choices(),
+                    value="amp_compile",
                     label="Mode B",
                 )
             cmp_btn = gr.Button("Compare", variant="primary")

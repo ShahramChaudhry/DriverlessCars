@@ -30,10 +30,10 @@ OPTIMIZATION_MODES: dict[str, dict] = {
         "compile_mode": None,
         "label":        "AMP only (no torch.compile)",
     },
-    "torch_compile_amp": {
+    "amp_compile": {
         "use_amp":      True,
         "compile_mode": "max-autotune-no-cudagraphs",
-        "label":        "torch.compile() + AMP · max-autotune-no-cudagraphs",
+        "label":        "AMP + torch.compile() · max-autotune-no-cudagraphs",
     },
 }
 
