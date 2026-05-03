@@ -94,17 +94,12 @@ def load_model(mode: str = "eager", weight: str | None = None) -> ModelBundle:
                 f"[INFO] Compiling model (mode='{cfg['compile_mode']}') — "
                 f"this may take several minutes for max-autotune ..."
             )
-            try:
-                nn_model = torch.compile(
-                    nn_model,
-                    mode=cfg["compile_mode"],
-                    options={"triton.cudagraphs": False},
-                )
-            except (TypeError, ValueError):
-                nn_model = torch.compile(nn_model, mode=cfg["compile_mode"])
+            # PyTorch disallows passing both `mode` and `options` together; cudagraphs are
+            # turned off via torch._inductor.config above, not via torch.compile(..., options=).
+            nn_model = torch.compile(nn_model, mode=cfg["compile_mode"])
             print(
                 "[INFO] Inductor Triton CUDA graphs disabled for YOLO compatibility "
-                "(slightly less 'reduce-overhead' than stock, avoids CUDAGraph overwrite errors)."
+                "(via torch._inductor.config; avoids CUDAGraph overwrite errors)."
             )
 
     # AMP disabled on CPU; float16 path is CUDA-only here
