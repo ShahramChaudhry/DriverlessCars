@@ -13,3 +13,6 @@ IOU_THRESHOLD  = 0.45
 WARMUP_FRAMES     = 10
 BENCHMARK_REPEATS = 5    # first run discarded → stats from 4 runs
 MAX_DEMO_FRAMES   = 100  # cap keeps VRAM usage ~470 MB and latency manageable
+
+# Pruning (structured / unstructured modes) — same default ratio as ResNet experiments
+PRUNE_RATIO = 0.40

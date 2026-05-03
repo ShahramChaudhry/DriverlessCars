@@ -23,13 +23,8 @@ from benchmark    import warmup_model, benchmark_video
 
 
 def _mode_radio_choices() -> list[tuple[str, str]]:
-    """(visible label, registry key) — four fixed modes: eager, torch_compile, amp, amp_compile."""
-    return [
-        ("Eager — FP32, no torch.compile", "eager"),
-        ("torch.compile() — FP32 (compiled YOLO, max-autotune-no-cudagraphs)", "torch_compile"),
-        ("AMP — FP16, no torch.compile", "amp"),
-        ("AMP + torch.compile() (max-autotune-no-cudagraphs)", "amp_compile"),
-    ]
+    """(visible label, registry key) — mirrors model_loader.OPTIMIZATION_MODES order."""
+    return [(v["label"], k) for k, v in OPTIMIZATION_MODES.items()]
 
 
 # ── Lazy model cache — prevents re-compiling across Gradio clicks ─────────────
@@ -208,7 +203,8 @@ with gr.Blocks(
                         label="Model Weight",
                     )
                     gr.Markdown(
-                        "**Pick one of four modes:** `eager` · `torch_compile` · `amp` · `amp_compile`"
+                        "**Modes:** "
+                        + " · ".join(f"`{k}`" for k in OPTIMIZATION_MODES)
                     )
                     mode_sel = gr.Radio(
                         choices=_mode_radio_choices(),
@@ -269,7 +265,7 @@ with gr.Blocks(
                 label="Batch size (frames per forward call)",
             )
             with gr.Row():
-                gr.Markdown("**Mode A vs Mode B** — same four options as tab 1.")
+                gr.Markdown("**Mode A vs Mode B** — same six options as tab 1.")
                 cmp_a = gr.Radio(
                     choices=_mode_radio_choices(),
                     value="eager",
