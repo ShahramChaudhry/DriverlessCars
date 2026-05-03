@@ -37,13 +37,13 @@ OPTIMIZATION_MODES: dict[str, dict] = {
     },
     "structured_prune": {
         "use_amp":      False,
-        "compile_mode": "max-autotune-no-cudagraphs",
-        "label":        "Structured prune + torch.compile() (prune first, then compile)",
+        "compile_mode": None,
+        "label":        "Structured prune — torch-pruning magnitude (no torch.compile)",
     },
     "unstructured_prune": {
         "use_amp":      False,
-        "compile_mode": "max-autotune-no-cudagraphs",
-        "label":        "Unstructured prune + torch.compile() (prune first, then compile)",
+        "compile_mode": None,
+        "label":        "Unstructured prune — L1 Conv2d/Linear (no torch.compile)",
     },
 }
 
@@ -123,8 +123,8 @@ def load_model(mode: str = "eager", weight: str | None = None) -> ModelBundle:
         else:
             cm = cfg["compile_mode"]
             print(
-                f"[INFO] torch.compile(mode={cm!r}) after other transforms — "
-                "first run can take several minutes …"
+                f"[INFO] Compiling model (torch.compile mode={cm!r}) — "
+                "first run after load can take several minutes …"
             )
             try:
                 nn_model = torch.compile(nn_model, mode=cm)
