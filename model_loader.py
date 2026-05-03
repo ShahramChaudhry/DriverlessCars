@@ -12,31 +12,28 @@ from ultralytics import YOLO
 from config import DEVICE, MODEL_WEIGHT
 
 # Registry — add new modes here without touching any other file
+# Use max-autotune-no-cudagraphs (not reduce-overhead): YOLOv8 Detect mutates
+# buffers during forward; CUDA graphs from reduce-overhead break at runtime.
 OPTIMIZATION_MODES: dict[str, dict] = {
     "eager": {
         "use_amp":      False,
         "compile_mode": None,
         "label":        "Eager Baseline (FP32, no compile)",
     },
-    "compile_reduce_overhead": {
+    "compile_safe": {
         "use_amp":      False,
-        "compile_mode": "reduce-overhead",
-        "label":        "torch.compile — reduce-overhead",
-    },
-    "compile_max_autotune": {
-        "use_amp":      False,
-        "compile_mode": "max-autotune",
-        "label":        "torch.compile — max-autotune  ⚠ slow first run",
+        "compile_mode": "max-autotune-no-cudagraphs",
+        "label":        "torch.compile — max-autotune-no-cudagraphs (stable with YOLO)",
     },
     "amp": {
         "use_amp":      True,
         "compile_mode": None,
         "label":        "AMP only (FP16 mixed precision)",
     },
-    "amp_compile_reduce_overhead": {
+    "amp_compile_safe": {
         "use_amp":      True,
-        "compile_mode": "reduce-overhead",
-        "label":        "AMP + torch.compile — reduce-overhead",
+        "compile_mode": "max-autotune-no-cudagraphs",
+        "label":        "AMP + torch.compile — max-autotune-no-cudagraphs",
     },
 }
 
@@ -76,31 +73,19 @@ def load_model(mode: str = "eager", weight: str | None = None) -> ModelBundle:
         if DEVICE.type != "cuda":
             print(f"[WARN] torch.compile requires CUDA — running eager for mode={mode}")
         else:
-            # YOLOv8 Detect mutates anchors/strides inside forward; Inductor CUDA graphs
-            # then error on "tensor output overwritten". Disable Triton CUDAGraph capture.
+            cm = cfg["compile_mode"]
+            print(
+                f"[INFO] Compiling model (torch.compile mode={cm!r}) — "
+                "first run after load can take several minutes …"
+            )
             try:
-                import torch._inductor.config as inductor_config
-
-                if hasattr(inductor_config, "triton"):
-                    tr = inductor_config.triton
-                    if hasattr(tr, "cudagraphs"):
-                        tr.cudagraphs = False
-                    if hasattr(tr, "cudagraph_trees"):
-                        tr.cudagraph_trees = False
-            except Exception:
-                pass
-
-            print(
-                f"[INFO] Compiling model (mode='{cfg['compile_mode']}') — "
-                f"this may take several minutes for max-autotune ..."
-            )
-            # PyTorch disallows passing both `mode` and `options` together; cudagraphs are
-            # turned off via torch._inductor.config above, not via torch.compile(..., options=).
-            nn_model = torch.compile(nn_model, mode=cfg["compile_mode"])
-            print(
-                "[INFO] Inductor Triton CUDA graphs disabled for YOLO compatibility "
-                "(via torch._inductor.config; avoids CUDAGraph overwrite errors)."
-            )
+                nn_model = torch.compile(nn_model, mode=cm)
+            except Exception as e:
+                print(
+                    f"[WARN] mode={cm!r} failed ({e}); "
+                    "falling back to mode='default' (upgrade PyTorch for no-cudagraphs autotune)."
+                )
+                nn_model = torch.compile(nn_model, mode="default")
 
     # AMP disabled on CPU; float16 path is CUDA-only here
     use_amp = cfg["use_amp"] and (DEVICE.type == "cuda")

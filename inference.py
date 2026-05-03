@@ -185,7 +185,7 @@ from ultralytics.utils import nms, ops
 from ultralytics.utils.plotting import Annotator, colors as yolo_colors
 
 from config import DEVICE, IMG_SIZE, CONF_THRESHOLD, IOU_THRESHOLD, MAX_DEMO_FRAMES
-from model_loader import OPTIMIZATION_MODES, ModelBundle
+from model_loader import ModelBundle
 
 
 # ── Preprocessing ──────────────────────────────────────────────────────────────
@@ -277,16 +277,6 @@ def _forward(bundle: ModelBundle, tensor: torch.Tensor) -> torch.Tensor:
     Single forward pass with optional AMP.
     The YOLOv8 Detect head may return a tuple; use only prediction tensor for NMS.
     """
-    # torch.compile(..., "reduce-overhead") captures CUDA graphs; YOLO mutates module
-    # buffers inside forward (anchors/strides), so each frame must start a new graph step.
-    if (
-        DEVICE.type == "cuda"
-        and OPTIMIZATION_MODES.get(bundle.mode, {}).get("compile_mode") is not None
-    ):
-        mark = getattr(torch.compiler, "cudagraph_mark_step_begin", None)
-        if mark is not None:
-            mark()
-
     with torch.autocast(
         device_type=DEVICE.type,
         dtype=torch.float16,

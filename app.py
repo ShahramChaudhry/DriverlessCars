@@ -263,7 +263,7 @@ with gr.Blocks(
                 )
                 cmp_b = gr.Dropdown(
                     choices=list(OPTIMIZATION_MODES.keys()),
-                    value="amp_compile_reduce_overhead",
+                    value="amp_compile_safe",
                     label="Mode B",
                 )
             cmp_btn = gr.Button("Compare", variant="primary")
@@ -283,8 +283,8 @@ with gr.Blocks(
         "- **Google Colab:** Runtime → Change runtime type → **GPU**, then upload and run "
         "`colab/DriverlessCars_Colab.ipynb` from this repository\n"
         "- Upload a 10–30 s front-camera clip for fast results\n"
-        "- `compile_max_autotune` has a 5–15 min first-run compile penalty"
-        " — trigger it once before the live presentation\n"
+        "- `compile_safe` / `amp_compile_safe` use **max-autotune-no-cudagraphs** — "
+        "first-run compile can take several minutes; run once before a live demo\n"
         "- Swap `MODEL_WEIGHT = 'yolov8s.pt'` in `config.py` for better detection accuracy\n"
         "- All compiled models are cached in memory — switching modes after first load is instant\n"
         f"- To process longer clips increase `MAX_DEMO_FRAMES` in `config.py` (currently {MAX_DEMO_FRAMES})"
