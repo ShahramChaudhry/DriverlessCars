@@ -5,6 +5,7 @@ benchmark philosophy where model loading was never part of the timed loop.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+
 import torch
 import torch.nn as nn
 from ultralytics import YOLO
@@ -75,11 +76,36 @@ def load_model(mode: str = "eager", weight: str | None = None) -> ModelBundle:
         if DEVICE.type != "cuda":
             print(f"[WARN] torch.compile requires CUDA — running eager for mode={mode}")
         else:
+            # YOLOv8 Detect mutates anchors/strides inside forward; Inductor CUDA graphs
+            # then error on "tensor output overwritten". Disable Triton CUDAGraph capture.
+            try:
+                import torch._inductor.config as inductor_config
+
+                if hasattr(inductor_config, "triton"):
+                    tr = inductor_config.triton
+                    if hasattr(tr, "cudagraphs"):
+                        tr.cudagraphs = False
+                    if hasattr(tr, "cudagraph_trees"):
+                        tr.cudagraph_trees = False
+            except Exception:
+                pass
+
             print(
                 f"[INFO] Compiling model (mode='{cfg['compile_mode']}') — "
                 f"this may take several minutes for max-autotune ..."
             )
-            nn_model = torch.compile(nn_model, mode=cfg["compile_mode"])
+            try:
+                nn_model = torch.compile(
+                    nn_model,
+                    mode=cfg["compile_mode"],
+                    options={"triton.cudagraphs": False},
+                )
+            except (TypeError, ValueError):
+                nn_model = torch.compile(nn_model, mode=cfg["compile_mode"])
+            print(
+                "[INFO] Inductor Triton CUDA graphs disabled for YOLO compatibility "
+                "(slightly less 'reduce-overhead' than stock, avoids CUDAGraph overwrite errors)."
+            )
 
     # AMP disabled on CPU; float16 path is CUDA-only here
     use_amp = cfg["use_amp"] and (DEVICE.type == "cuda")
