@@ -238,7 +238,7 @@ def load_video_frames(
     max_frames: int = MAX_DEMO_FRAMES,
 ) -> tuple[list, list, list, list, list, float, tuple[int, int]]:
     """
-    Read all frames, preprocess them, move tensors to GPU.
+    Read all frames, preprocess them, move tensors to DEVICE (CUDA when available, else CPU).
     This is the video equivalent of building gpu_batches in the ResNet benchmark —
     all preprocessing happens here so it is excluded from timing.
 
@@ -259,7 +259,9 @@ def load_video_frames(
 
         t, orig_shape, ratio, pad = preprocess_frame(frame, img_size)
         raw_frames.append(frame.copy())
-        tensors.append(t.to(DEVICE, non_blocking=True))  # pre-resident on GPU
+        tensors.append(
+            t.to(DEVICE, non_blocking=(DEVICE.type == "cuda"))
+        )  # pre-resident on GPU (CUDA) or CPU
         shapes.append(orig_shape)
         ratios.append(ratio)
         pads.append(pad)

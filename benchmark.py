@@ -117,11 +117,13 @@ Rules followed:
 - compile time is excluded
 - warmup is excluded
 - timing focuses on inference only
-- CUDA events are used for accurate GPU timing
+- CUDA events on GPU; wall-clock on CPU
 """
 from __future__ import annotations
 
 import statistics
+import time
+
 import torch
 
 from ultralytics.utils import nms
@@ -176,7 +178,7 @@ def benchmark_video(
     timing_scope: str = "forward+nms",
 ) -> dict:
     """
-    Benchmark inference on GPU-resident video tensors.
+    Benchmark inference on DEVICE-resident video tensors.
 
     Returns metrics dict with:
     - per-run times
@@ -199,8 +201,7 @@ def benchmark_video(
             end = torch.cuda.Event(enable_timing=True)
             start.record()
         else:
-            import time
-            t0 = time.time()
+            t0 = time.perf_counter()
 
         for i in range(0, len(tensors), batch_size):
             batch = torch.cat(tensors[i : i + batch_size], dim=0)
@@ -217,7 +218,7 @@ def benchmark_video(
             torch.cuda.synchronize()
             elapsed = start.elapsed_time(end) / 1000.0
         else:
-            elapsed = time.time() - t0
+            elapsed = time.perf_counter() - t0
 
         times.append(elapsed)
 

@@ -67,8 +67,8 @@ def load_model(mode: str = "eager", weight: str | None = None) -> ModelBundle:
     stride   = int(yolo.model.stride.max())
 
     # Global speed flags — mirrors ResNet benchmark setup
-    torch.backends.cudnn.benchmark = True
     if DEVICE.type == "cuda":
+        torch.backends.cudnn.benchmark = True
         torch.set_float32_matmul_precision("high")
 
     if cfg["compile_mode"] is not None:
@@ -81,7 +81,7 @@ def load_model(mode: str = "eager", weight: str | None = None) -> ModelBundle:
             )
             nn_model = torch.compile(nn_model, mode=cfg["compile_mode"])
 
-    # AMP disabled on CPU: float16 unsupported; keeps parity with GPU-only ResNet experiments
+    # AMP disabled on CPU; float16 path is CUDA-only here
     use_amp = cfg["use_amp"] and (DEVICE.type == "cuda")
 
     return ModelBundle(

@@ -3,14 +3,16 @@ Gradio demo — Driverless Car Perception with Optimization Mode Comparison.
 
 Call graph:
   load_model(mode)         →  ModelBundle  (torch.compile applied here, NOT timed)
-  load_video_frames(path)  →  GPU tensors  (preprocessing offline, like gpu_batches)
+  load_video_frames(path)  →  GPU tensors on CUDA (preprocessing offline, like gpu_batches)
   warmup_model(bundle, …)  →  triggers JIT / kernel caches  (not timed)
-  benchmark_video(…)       →  CUDA-event timing  (mirrors ResNet bench)
+  benchmark_video(…)       →  CUDA-event timing on GPU (mirrors ResNet bench)
   run_video_inference(…)   →  annotated frames for visualization
   save_video(…)            →  mp4 for Gradio output
 """
 from __future__ import annotations
+import os
 import tempfile
+
 import gradio as gr
 import torch
 
@@ -54,7 +56,7 @@ def run_demo(
         progress(0.05, desc="Loading / retrieving model ...")
         bundle = _get_model(mode, model_weight)
 
-        progress(0.20, desc="Loading & preprocessing frames (letterbox → GPU tensors) ...")
+        progress(0.20, desc="Loading & preprocessing frames (letterbox → device tensors) ...")
         raw_frames, tensors, shapes, ratios, pads, fps, orig_wh = load_video_frames(video_path)
 
         if not tensors:
@@ -149,11 +151,11 @@ def compare_modes(
 
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
-_device_label = (
-    f"GPU — {torch.cuda.get_device_name(0)}"
-    if torch.cuda.is_available()
-    else "CPU  (compile modes and AMP will fall back to eager)"
-)
+def _device_label() -> str:
+    if DEVICE.type == "cuda":
+        return f"GPU — {torch.cuda.get_device_name(0)}"
+    return "CPU  (no CUDA GPU — compile modes and AMP fall back to eager / off)"
+
 
 _mode_table = "| Mode key | Description |\n|---|---|\n" + "\n".join(
     f"| `{k}` | {v['label']} |" for k, v in OPTIMIZATION_MODES.items()
@@ -164,7 +166,7 @@ _bench_philosophy = (
     "model load & compile time excluded · "
     f"{WARMUP_FRAMES} warmup frames discarded · "
     "first timed run discarded · "
-    "CUDA events for sub-ms accuracy · "
+    "CUDA events for timing on GPU; wall-clock on CPU · "
     "NMS included in timing · "
     f"max {MAX_DEMO_FRAMES} frames per video"
 )
@@ -176,7 +178,7 @@ with gr.Blocks(
 
     gr.Markdown(
         f"# Driverless Car Perception — Optimisation Demo\n"
-        f"**Device:** {_device_label}  |  "
+        f"**Device:** {_device_label()}  |  "
         f"**Model:** YOLOv8-nano (COCO 80 classes)  |  "
         f"**Conf:** {CONF_THRESHOLD}"
     )
@@ -278,6 +280,8 @@ with gr.Blocks(
     gr.Markdown(
         "---\n"
         "**Tips for a live demo**\n"
+        "- **Google Colab:** Runtime → Change runtime type → **GPU**, then upload and run "
+        "`colab/DriverlessCars_Colab.ipynb` from this repository\n"
         "- Upload a 10–30 s front-camera clip for fast results\n"
         "- `compile_max_autotune` has a 5–15 min first-run compile penalty"
         " — trigger it once before the live presentation\n"
@@ -287,5 +291,32 @@ with gr.Blocks(
     )
 
 
+def _want_gradio_share() -> bool:
+    """Public Gradio link when GRADIO_SHARE=1 or when running inside Google Colab."""
+    v = os.environ.get("GRADIO_SHARE", "").lower()
+    if v in ("0", "false", "no"):
+        return False
+    if v in ("1", "true", "yes"):
+        return True
+    if os.environ.get("COLAB_RELEASE_TAG"):
+        return True
+    try:
+        import google.colab  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def launch_gradio(*, share: bool | None = None) -> None:
+    """Start the Gradio server (used by `python app.py` and Colab notebooks)."""
+    if share is None:
+        share = _want_gradio_share()
+    demo.launch(
+        share=share,
+        server_name="0.0.0.0" if share else "127.0.0.1",
+    )
+
+
 if __name__ == "__main__":
-    demo.launch(share=False)
+    launch_gradio()
