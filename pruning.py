@@ -63,8 +63,34 @@ def apply_structured_magnitude(
         pruning_ratio=pruning_ratio,
         ignored_layers=ignored,
     )
+    conv_before = {
+        name: m.out_channels
+        for name, m in model.named_modules()
+        if isinstance(m, nn.Conv2d)
+    }
+
     pruner.step()
+
     print(
         f"[INFO] Structured magnitude prune ratio={pruning_ratio} "
         f"(ignored {len(ignored)} head module(s))."
     )
+
+    changed: list[tuple[str, int, int]] = []
+    for name, m in model.named_modules():
+        if isinstance(m, nn.Conv2d) and name in conv_before:
+            b, a = conv_before[name], m.out_channels
+            if b != a:
+                changed.append((name, b, a))
+
+    if changed:
+        print("[INFO] Conv2d out_channels changed (structured):")
+        for name, b, a in changed[:50]:
+            print(f"  {name}: {b} -> {a}")
+        if len(changed) > 50:
+            print(f"  ... and {len(changed) - 50} more Conv2d layers")
+    else:
+        print(
+            "[WARN] No Conv2d out_channels changed — structured pass may not have "
+            "removed channels on this YOLO graph (check pruning_ratio / torch-pruning version)."
+        )

@@ -37,13 +37,13 @@ OPTIMIZATION_MODES: dict[str, dict] = {
     },
     "structured_prune": {
         "use_amp":      False,
-        "compile_mode": None,
-        "label":        "Structured prune — torch-pruning magnitude (Detect head ignored)",
+        "compile_mode": "max-autotune-no-cudagraphs",
+        "label":        "Structured prune + torch.compile() (prune first, then compile)",
     },
     "unstructured_prune": {
         "use_amp":      False,
-        "compile_mode": None,
-        "label":        "Unstructured prune — L1 Conv2d/Linear (nn.utils.prune, then remove)",
+        "compile_mode": "max-autotune-no-cudagraphs",
+        "label":        "Unstructured prune + torch.compile() (prune first, then compile)",
     },
 }
 
@@ -74,23 +74,43 @@ def load_model(mode: str = "eager", weight: str | None = None) -> ModelBundle:
     names    = yolo.names
     stride   = int(yolo.model.stride.max())
 
+    def _param_count(m: nn.Module) -> int:
+        return sum(p.numel() for p in m.parameters())
+
+    if mode in ("unstructured_prune", "structured_prune"):
+        n_params_before = _param_count(nn_model)
+        print(f"[INFO] Parameter count before prune: {n_params_before:,}")
+
     if mode == "unstructured_prune":
         from pruning import apply_unstructured_l1
 
         print(
-            "[NOTE] Unstructured prune only (no ImageNet-style finetune in this demo); "
-            "accuracy may drop vs your offline ResNet script."
+            "[NOTE] Unstructured prune (no finetune in demo). "
+            "Parameter count stays same; weights are sparsified in place."
         )
         apply_unstructured_l1(nn_model, PRUNE_RATIO)
+        n_params_after = _param_count(nn_model)
+        print(f"[INFO] Parameter count after prune:  {n_params_after:,}")
+        if n_params_after == n_params_before:
+            print(
+                "[INFO] (Expected for unstructured: numel unchanged vs structured, "
+                "where channels are removed.)"
+            )
     elif mode == "structured_prune":
         from pruning import apply_structured_magnitude
 
-        print(
-            "[NOTE] Structured prune only (no finetune loop in Gradio); "
-            "requires `pip install torch-pruning`."
-        )
+        print("[NOTE] Structured prune (no finetune in demo); requires `pip install torch-pruning`.")
         example = torch.randn(1, 3, IMG_SIZE, IMG_SIZE, device=DEVICE, dtype=torch.float32)
         apply_structured_magnitude(nn_model, example, PRUNE_RATIO)
+        n_params_after = _param_count(nn_model)
+        print(f"[INFO] Parameter count after prune:  {n_params_after:,}")
+        if n_params_after < n_params_before:
+            print(f"[INFO] Structured pruning removed {n_params_before - n_params_after:,} parameters.")
+        elif n_params_after == n_params_before:
+            print(
+                "[WARN] Parameter count unchanged after structured prune — "
+                "ratio may be too low for this graph or heads absorbed all protection."
+            )
 
     # Global speed flags — mirrors ResNet benchmark setup
     if DEVICE.type == "cuda":
@@ -103,8 +123,8 @@ def load_model(mode: str = "eager", weight: str | None = None) -> ModelBundle:
         else:
             cm = cfg["compile_mode"]
             print(
-                f"[INFO] Compiling model (torch.compile mode={cm!r}) — "
-                "first run after load can take several minutes …"
+                f"[INFO] torch.compile(mode={cm!r}) after other transforms — "
+                "first run can take several minutes …"
             )
             try:
                 nn_model = torch.compile(nn_model, mode=cm)
