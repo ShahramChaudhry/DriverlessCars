@@ -18,22 +18,22 @@ OPTIMIZATION_MODES: dict[str, dict] = {
     "eager": {
         "use_amp":      False,
         "compile_mode": None,
-        "label":        "Eager Baseline (FP32, no compile)",
+        "label":        "Eager (FP32, no torch.compile)",
     },
-    "compile_safe": {
+    "torch_compile": {
         "use_amp":      False,
         "compile_mode": "max-autotune-no-cudagraphs",
-        "label":        "torch.compile — max-autotune-no-cudagraphs (stable with YOLO)",
+        "label":        "torch.compile() — FP32 · max-autotune-no-cudagraphs",
     },
     "amp": {
         "use_amp":      True,
         "compile_mode": None,
-        "label":        "AMP only (FP16 mixed precision)",
+        "label":        "AMP only (no torch.compile)",
     },
-    "amp_compile_safe": {
+    "torch_compile_amp": {
         "use_amp":      True,
         "compile_mode": "max-autotune-no-cudagraphs",
-        "label":        "AMP + torch.compile — max-autotune-no-cudagraphs",
+        "label":        "torch.compile() + AMP · max-autotune-no-cudagraphs",
     },
 }
 

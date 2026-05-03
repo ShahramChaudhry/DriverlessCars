@@ -18,6 +18,11 @@ import torch
 
 from config       import DEVICE, WARMUP_FRAMES, BENCHMARK_REPEATS, MAX_DEMO_FRAMES, CONF_THRESHOLD
 from model_loader import load_model, OPTIMIZATION_MODES
+
+
+def _mode_dropdown_choices() -> list[tuple[str, str]]:
+    """(Gradio label, registry key) — UI shows torch.compile() names; backend uses keys."""
+    return [(v["label"], k) for k, v in OPTIMIZATION_MODES.items()]
 from inference    import load_video_frames, run_video_inference, save_video
 from benchmark    import warmup_model, benchmark_video
 
@@ -157,8 +162,9 @@ def _device_label() -> str:
     return "CPU  (no CUDA GPU — compile modes and AMP fall back to eager / off)"
 
 
-_mode_table = "| Mode key | Description |\n|---|---|\n" + "\n".join(
-    f"| `{k}` | {v['label']} |" for k, v in OPTIMIZATION_MODES.items()
+_mode_table = (
+    "| Internal key | What you see in the menu |\n|---|---|\n"
+    + "\n".join(f"| `{k}` | {v['label']} |" for k, v in OPTIMIZATION_MODES.items())
 )
 
 _bench_philosophy = (
@@ -198,9 +204,9 @@ with gr.Blocks(
                         label="Model Weight",
                     )
                     mode_sel = gr.Dropdown(
-                        choices=list(OPTIMIZATION_MODES.keys()),
+                        choices=_mode_dropdown_choices(),
                         value="eager",
-                        label="Optimisation Mode",
+                        label="Optimisation mode (torch.compile() = compiled YOLO)",
                     )
                     timing_sel = gr.Radio(
                         choices=["forward", "forward+nms"],
@@ -257,13 +263,13 @@ with gr.Blocks(
             )
             with gr.Row():
                 cmp_a = gr.Dropdown(
-                    choices=list(OPTIMIZATION_MODES.keys()),
+                    choices=_mode_dropdown_choices(),
                     value="eager",
                     label="Mode A",
                 )
                 cmp_b = gr.Dropdown(
-                    choices=list(OPTIMIZATION_MODES.keys()),
-                    value="amp_compile_safe",
+                    choices=_mode_dropdown_choices(),
+                    value="torch_compile_amp",
                     label="Mode B",
                 )
             cmp_btn = gr.Button("Compare", variant="primary")
@@ -283,8 +289,8 @@ with gr.Blocks(
         "- **Google Colab:** Runtime → Change runtime type → **GPU**, then upload and run "
         "`colab/DriverlessCars_Colab.ipynb` from this repository\n"
         "- Upload a 10–30 s front-camera clip for fast results\n"
-        "- `compile_safe` / `amp_compile_safe` use **max-autotune-no-cudagraphs** — "
-        "first-run compile can take several minutes; run once before a live demo\n"
+        "- **torch.compile()** modes use `max-autotune-no-cudagraphs` (YOLO-safe); "
+        "first-run compile can take several minutes — run once before a live demo\n"
         "- Swap `MODEL_WEIGHT = 'yolov8s.pt'` in `config.py` for better detection accuracy\n"
         "- All compiled models are cached in memory — switching modes after first load is instant\n"
         f"- To process longer clips increase `MAX_DEMO_FRAMES` in `config.py` (currently {MAX_DEMO_FRAMES})"
