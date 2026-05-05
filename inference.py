@@ -177,6 +177,8 @@ strategy as building gpu_batches in the ResNet50 benchmark.
 """
 from __future__ import annotations
 
+import time
+
 import cv2
 import numpy as np
 import torch
@@ -344,6 +346,74 @@ def run_video_inference(
         )[0]
 
         ann = annotate_frame(frame, det, bundle.names, orig_shape)
+        annotated.append(ann)
+
+    return annotated
+
+
+def _overlay_text_top_left(frame_bgr: np.ndarray, text: str) -> np.ndarray:
+    out = frame_bgr.copy()
+    cv2.putText(
+        out,
+        text,
+        (12, 32),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.9,
+        (0, 0, 0),
+        4,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        out,
+        text,
+        (12, 32),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.9,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    return out
+
+
+@torch.inference_mode()
+def run_video_inference_with_fps_overlay(
+    bundle: ModelBundle,
+    raw_frames: list,
+    tensors: list,
+    shapes: list,
+    ratios: list,
+    pads: list,
+    *,
+    overlay_label: str,
+) -> list[np.ndarray]:
+    """
+    Full annotated pass with an (EMA) FPS overlay per frame.
+    FPS is measured for forward+NMS+annotation. On CUDA we synchronize for accuracy.
+    """
+    annotated: list[np.ndarray] = []
+    ema_fps: float | None = None
+
+    for frame, t, orig_shape in zip(raw_frames, tensors, shapes):
+        if DEVICE.type == "cuda":
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+
+        pred = _forward(bundle, t)
+        det = nms.non_max_suppression(
+            pred,
+            conf_thres=CONF_THRESHOLD,
+            iou_thres=IOU_THRESHOLD,
+        )[0]
+        ann = annotate_frame(frame, det, bundle.names, orig_shape)
+
+        if DEVICE.type == "cuda":
+            torch.cuda.synchronize()
+        dt = max(time.perf_counter() - t0, 1e-9)
+        fps_inst = 1.0 / dt
+        ema_fps = fps_inst if ema_fps is None else (0.9 * ema_fps + 0.1 * fps_inst)
+
+        ann = _overlay_text_top_left(ann, f"{overlay_label} | FPS: {ema_fps:.1f}")
         annotated.append(ann)
 
     return annotated

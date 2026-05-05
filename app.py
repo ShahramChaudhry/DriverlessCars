@@ -18,7 +18,12 @@ import torch
 
 from config       import DEVICE, WARMUP_FRAMES, BENCHMARK_REPEATS, MAX_DEMO_FRAMES, CONF_THRESHOLD
 from model_loader import load_model, OPTIMIZATION_MODES
-from inference    import load_video_frames, run_video_inference, save_video
+from inference    import (
+    load_video_frames,
+    run_video_inference,
+    run_video_inference_with_fps_overlay,
+    save_video,
+)
 from benchmark    import warmup_model, benchmark_video
 
 
@@ -155,6 +160,60 @@ def compare_modes(
     return results[mode_a], results[mode_b]
 
 
+def compare_fixed_videos(
+    video_path: str | None,
+    model_weight: str,
+    progress=gr.Progress(),
+) -> tuple[str | None, str | None]:
+    """
+    Produce two output videos side-by-side:
+      - Eager
+      - AMP + torch.compile (max-autotune-no-cudagraphs)
+    Each output has a per-frame FPS overlay.
+    """
+    if video_path is None:
+        return None, None
+
+    progress(0.05, desc="Loading & preprocessing frames ...")
+    raw_frames, tensors, shapes, ratios, pads, fps, _ = load_video_frames(video_path)
+    if not tensors:
+        return None, None
+
+    progress(0.15, desc="Loading models (cached) ...")
+    bundle_eager = _get_model("eager", model_weight)
+    bundle_ampc = _get_model("amp_compile", model_weight)
+
+    progress(0.30, desc="Running Eager video inference ...")
+    eager_frames = run_video_inference_with_fps_overlay(
+        bundle_eager,
+        raw_frames,
+        tensors,
+        shapes,
+        ratios,
+        pads,
+        overlay_label="Eager",
+    )
+
+    progress(0.65, desc="Running AMP+Compile video inference ...")
+    ampc_frames = run_video_inference_with_fps_overlay(
+        bundle_ampc,
+        raw_frames,
+        tensors,
+        shapes,
+        ratios,
+        pads,
+        overlay_label="AMP + Compile",
+    )
+
+    progress(0.90, desc="Saving output videos ...")
+    out_a = tempfile.mktemp(suffix=".mp4")
+    out_b = tempfile.mktemp(suffix=".mp4")
+    save_video(eager_frames, out_a, fps)
+    save_video(ampc_frames, out_b, fps)
+
+    progress(1.0, desc="Done!")
+    return out_a, out_b
+
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
 def _device_label() -> str:
     if DEVICE.type == "cuda":
@@ -243,48 +302,26 @@ with gr.Blocks(
         # ── Tab 2: Side-by-side comparison ───────────────────────────────────
         with gr.TabItem("Compare Two Modes"):
             gr.Markdown(
-                "Run the **same video** through two optimisation modes "
-                "and compare per-frame latency / FPS side-by-side."
+                "Outputs two looping videos side-by-side with FPS overlay:\n"
+                "- **Eager**\n"
+                "- **AMP + torch.compile**"
             )
-            cmp_vid = gr.Video(label="Input Video")
             cmp_model = gr.Dropdown(
                 choices=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"],
                 value="yolov8n.pt",
                 label="Model Weight",
             )
-            cmp_timing = gr.Radio(
-                choices=["forward", "forward+nms"],
-                value="forward+nms",
-                label="Benchmark Timing Scope",
-            )
-            cmp_batch = gr.Slider(
-                minimum=1,
-                maximum=64,
-                value=1,
-                step=1,
-                label="Batch size (frames per forward call)",
-            )
+            cmp_upload = gr.Video(label="Input Video")
+            cmp_btn = gr.Button("Run Side-by-side", variant="primary")
+
             with gr.Row():
-                gr.Markdown("**Mode A vs Mode B** — same six options as tab 1.")
-                cmp_a = gr.Radio(
-                    choices=_mode_radio_choices(),
-                    value="eager",
-                    label="Mode A",
-                )
-                cmp_b = gr.Radio(
-                    choices=_mode_radio_choices(),
-                    value="amp_compile",
-                    label="Mode B",
-                )
-            cmp_btn = gr.Button("Compare", variant="primary")
-            with gr.Row():
-                cmp_out_a = gr.JSON(label="Mode A — Metrics")
-                cmp_out_b = gr.JSON(label="Mode B — Metrics")
+                out_eager = gr.Video(label="Eager (FPS overlaid)", autoplay=True, loop=True)
+                out_ampc  = gr.Video(label="AMP + Compile (FPS overlaid)", autoplay=True, loop=True)
 
             cmp_btn.click(
-                fn=compare_modes,
-                inputs=[cmp_vid, cmp_a, cmp_b, cmp_model, cmp_batch, cmp_timing],
-                outputs=[cmp_out_a, cmp_out_b],
+                fn=compare_fixed_videos,
+                inputs=[cmp_upload, cmp_model],
+                outputs=[out_eager, out_ampc],
             )
 
     gr.Markdown(
