@@ -120,56 +120,17 @@ def run_demo(
         return None, {"error": str(e)}
 
 
-# ── Side-by-side comparison ───────────────────────────────────────────────────
-def compare_modes(
-    video_path: str | None,
-    mode_a:     str,
-    mode_b:     str,
-    model_weight: str,
-    batch_size: int,
-    timing_scope: str,
-    progress=gr.Progress(),
-) -> tuple[dict, dict]:
-    if video_path is None:
-        return {"error": "Upload a video."}, {"error": "Upload a video."}
-    batch_size = int(batch_size)
-
-    progress(0.05, desc="Loading & preprocessing video frames ...")
-    _, tensors, *_ = load_video_frames(video_path)
-
-    results: dict[str, dict] = {}
-    for i, mode in enumerate([mode_a, mode_b]):
-        progress(0.10 + i * 0.45, desc=f"Benchmarking mode: {mode} ...")
-        bundle = _get_model(mode, model_weight)
-        warmup_model(
-            bundle,
-            tensors,
-            warmup_frames=WARMUP_FRAMES,
-            batch_size=batch_size,
-            timing_scope=timing_scope,
-        )
-        results[mode] = benchmark_video(
-            bundle,
-            tensors,
-            repeats=BENCHMARK_REPEATS,
-            batch_size=batch_size,
-            timing_scope=timing_scope,
-        )
-        results[mode]["model_weight"] = model_weight
-
-    return results[mode_a], results[mode_b]
-
-
-def compare_fixed_videos(
+def side_by_side_videos(
     video_path: str | None,
     model_weight: str,
+    mode_right: str,
     progress=gr.Progress(),
 ) -> tuple[str | None, str | None]:
     """
-    Produce two output videos side-by-side:
-      - Eager
-      - AMP + torch.compile (max-autotune-no-cudagraphs)
-    Each output has a per-frame FPS overlay.
+    Produce two output videos side-by-side (looping in UI):
+      - Left: eager
+      - Right: user-selected mode (default: amp_compile)
+    Each output has a per-frame (EMA) FPS overlay.
     """
     if video_path is None:
         return None, None
@@ -181,7 +142,7 @@ def compare_fixed_videos(
 
     progress(0.15, desc="Loading models (cached) ...")
     bundle_eager = _get_model("eager", model_weight)
-    bundle_ampc = _get_model("amp_compile", model_weight)
+    bundle_right = _get_model(mode_right, model_weight)
 
     progress(0.30, desc="Running Eager video inference ...")
     eager_frames = run_video_inference_with_fps_overlay(
@@ -194,22 +155,22 @@ def compare_fixed_videos(
         overlay_label="Eager",
     )
 
-    progress(0.65, desc="Running AMP+Compile video inference ...")
-    ampc_frames = run_video_inference_with_fps_overlay(
-        bundle_ampc,
+    progress(0.65, desc=f"Running {mode_right} video inference ...")
+    right_frames = run_video_inference_with_fps_overlay(
+        bundle_right,
         raw_frames,
         tensors,
         shapes,
         ratios,
         pads,
-        overlay_label="AMP + Compile",
+        overlay_label=OPTIMIZATION_MODES.get(mode_right, {}).get("label", mode_right),
     )
 
     progress(0.90, desc="Saving output videos ...")
     out_a = tempfile.mktemp(suffix=".mp4")
     out_b = tempfile.mktemp(suffix=".mp4")
     save_video(eager_frames, out_a, fps)
-    save_video(ampc_frames, out_b, fps)
+    save_video(right_frames, out_b, fps)
 
     progress(1.0, desc="Done!")
     return out_a, out_b
@@ -236,105 +197,66 @@ _bench_philosophy = (
 )
 
 with gr.Blocks(
-    title="Driverless Car Perception — Optimisation Demo",
+    title="Driverless Car Perception — Side-by-side Demo",
     theme=gr.themes.Soft(),
 ) as demo:
 
     gr.Markdown(
-        f"# Driverless Car Perception — Optimisation Demo\n"
+        f"# Driverless Car Perception — Side-by-side Demo\n"
         f"**Device:** {_device_label()}  |  "
-        f"**Model:** YOLOv8-nano (COCO 80 classes)  |  "
+        f"**Left:** Eager  |  "
+        f"**Right:** selectable mode  |  "
         f"**Conf:** {CONF_THRESHOLD}"
     )
-    gr.Markdown(_bench_philosophy)
 
-    with gr.Tabs():
-
-        # ── Tab 1: Single mode ────────────────────────────────────────────────
-        with gr.TabItem("Single Mode — Inference + Benchmark"):
-
-            with gr.Row():
-                with gr.Column(scale=1):
-                    vid_in   = gr.Video(label="Input Driving Video")
-                    model_sel = gr.Dropdown(
-                        choices=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"],
-                        value="yolov8n.pt",
-                        label="Model Weight",
-                    )
-                    gr.Markdown(
-                        "**Modes:** "
-                        + " · ".join(f"`{k}`" for k in OPTIMIZATION_MODES)
-                    )
-                    mode_sel = gr.Radio(
-                        choices=_mode_radio_choices(),
-                        value="eager",
-                        label="Optimisation mode",
-                    )
-                    timing_sel = gr.Radio(
-                        choices=["forward", "forward+nms"],
-                        value="forward+nms",
-                        label="Benchmark Timing Scope",
-                    )
-                    batch_sel = gr.Slider(
-                        minimum=1,
-                        maximum=64,
-                        value=1,
-                        step=1,
-                        label="Batch size (frames per forward call)",
-                    )
-                    gr.Markdown(_mode_table)
-                    bench_cb = gr.Checkbox(
-                        value=True,
-                        label=f"Run benchmark  ({BENCHMARK_REPEATS} timed runs, adds ~5× inference time)",
-                    )
-                    run_btn = gr.Button("Run Inference", variant="primary")
-
-                with gr.Column(scale=1):
-                    vid_out     = gr.Video(label="Annotated Output")
-                    metrics_out = gr.JSON(label="Performance Metrics")
-
-            run_btn.click(
-                fn=run_demo,
-                inputs=[vid_in, mode_sel, bench_cb, model_sel, batch_sel, timing_sel],
-                outputs=[vid_out, metrics_out],
-            )
-
-        # ── Tab 2: Side-by-side comparison ───────────────────────────────────
-        with gr.TabItem("Compare Two Modes"):
-            gr.Markdown(
-                "Outputs two looping videos side-by-side with FPS overlay:\n"
-                "- **Eager**\n"
-                "- **AMP + torch.compile**"
-            )
-            cmp_model = gr.Dropdown(
+    # Controls (single page)
+    with gr.Row():
+        with gr.Column(scale=1):
+            upload = gr.File(label="Upload driving video (mp4/mov)", file_types=["video"])
+            model_weight = gr.Dropdown(
                 choices=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"],
                 value="yolov8n.pt",
                 label="Model Weight",
             )
-            cmp_upload = gr.Video(label="Input Video")
-            cmp_btn = gr.Button("Run Side-by-side", variant="primary")
 
-            with gr.Row():
-                out_eager = gr.Video(label="Eager (FPS overlaid)", autoplay=True, loop=True)
-                out_ampc  = gr.Video(label="AMP + Compile (FPS overlaid)", autoplay=True, loop=True)
-
-            cmp_btn.click(
-                fn=compare_fixed_videos,
-                inputs=[cmp_upload, cmp_model],
-                outputs=[out_eager, out_ampc],
+            right_mode_choices = [
+                (v["label"], k) for k, v in OPTIMIZATION_MODES.items() if k != "eager"
+            ]
+            right_mode = gr.Dropdown(
+                choices=right_mode_choices,
+                value="amp_compile",
+                label="Right-side optimisation mode (left is always eager)",
             )
+
+        with gr.Column(scale=2):
+            with gr.Row():
+                out_left = gr.Video(label="Left — Eager (FPS overlay)", autoplay=True, loop=True)
+                out_right = gr.Video(label="Right — Selected mode (FPS overlay)", autoplay=True, loop=True)
+
+    # Auto-run after upload; also rerun when mode/model changes (if upload exists).
+    upload.change(
+        fn=side_by_side_videos,
+        inputs=[upload, model_weight, right_mode],
+        outputs=[out_left, out_right],
+    )
+    model_weight.change(
+        fn=side_by_side_videos,
+        inputs=[upload, model_weight, right_mode],
+        outputs=[out_left, out_right],
+    )
+    right_mode.change(
+        fn=side_by_side_videos,
+        inputs=[upload, model_weight, right_mode],
+        outputs=[out_left, out_right],
+    )
 
     gr.Markdown(
         "---\n"
-        "**Tips for a live demo**\n"
-        "- **Google Colab:** Runtime → Change runtime type → **GPU**, then upload and run "
-        "`colab/DriverlessCars_Colab.ipynb` from this repository\n"
-        "- Upload a 10–30 s front-camera clip for fast results\n"
-        "- **torch.compile()** modes use `max-autotune-no-cudagraphs` (YOLO-safe); "
-        "first-run compile can take several minutes — run once before a live demo\n"
-        "- Swap `MODEL_WEIGHT = 'yolov8s.pt'` in `config.py` for better detection accuracy\n"
-        "- All compiled models are cached in memory — switching modes after first load is instant\n"
-        f"- To process longer clips increase `MAX_DEMO_FRAMES` in `config.py` (currently {MAX_DEMO_FRAMES})"
+        "**Notes**\n"
+        "- Upload once: outputs autoplay + loop side-by-side\n"
+        "- Changing the right-side mode reruns inference on the same video\n"
+        "- `torch.compile()` modes may take minutes on first use (cached afterwards)\n"
+        f"- Max frames per video: `{MAX_DEMO_FRAMES}` (`config.py`)"
     )
 
 
