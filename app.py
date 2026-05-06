@@ -211,8 +211,13 @@ with gr.Blocks(
 
     # Controls (single page)
     with gr.Row():
-        with gr.Column(scale=1):
-            upload = gr.File(label="Upload driving video (mp4/mov)", file_types=["video"])
+        with gr.Column(scale=1, min_width=360):
+            upload = gr.UploadButton(
+                "Upload driving video",
+                file_types=["video"],
+                file_count="single",
+                type="filepath",
+            )
             model_weight = gr.Dropdown(
                 choices=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"],
                 value="yolov8n.pt",
@@ -228,7 +233,7 @@ with gr.Blocks(
                 label="Right-side optimisation mode (left is always eager)",
             )
 
-        with gr.Column(scale=2):
+        with gr.Column(scale=3, min_width=900):
             with gr.Row():
                 out_left = gr.Video(label="Left — Eager (FPS overlay)", autoplay=True, loop=True)
                 out_right = gr.Video(label="Right — Selected mode (FPS overlay)", autoplay=True, loop=True)
