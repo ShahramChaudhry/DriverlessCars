@@ -199,36 +199,35 @@ _bench_philosophy = (
 with gr.Blocks(
     title="Side-by-side demo",
     theme=gr.themes.Soft(),
-) as demo:
+    css=\"\"\"\n+    .small-upload button {\n+      padding: 6px 10px !important;\n+      font-size: 13px !important;\n+      min-height: 0 !important;\n+    }\n+    \"\"\",\n+) as demo:
 
-    # Controls (single page)
+    # Top controls row (small upload button, above videos)
     with gr.Row():
-        with gr.Column(scale=1, min_width=360):
-            upload = gr.UploadButton(
-                "Upload driving video",
-                file_types=["video"],
-                file_count="single",
-                type="filepath",
-            )
-            model_weight = gr.Dropdown(
-                choices=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"],
-                value="yolov8n.pt",
-                label="Model",
-            )
+        upload = gr.UploadButton(
+            "Upload video",
+            file_types=["video"],
+            file_count="single",
+            type="filepath",
+            elem_classes=[\"small-upload\"],\n+        )
+        model_weight = gr.Dropdown(
+            choices=[\"yolov8n.pt\", \"yolov8s.pt\", \"yolov8m.pt\"],
+            value=\"yolov8n.pt\",
+            label=\"Model\",
+            scale=1,\n+        )
 
-            right_mode_choices = [
-                (v["label"], k) for k, v in OPTIMIZATION_MODES.items() if k != "eager"
-            ]
-            right_mode = gr.Dropdown(
-                choices=right_mode_choices,
-                value="amp_compile",
-                label="Right-side mode",
-            )
+        right_mode_choices = [
+            (v[\"label\"], k) for k, v in OPTIMIZATION_MODES.items() if k != \"eager\"
+        ]
+        right_mode = gr.Dropdown(
+            choices=right_mode_choices,
+            value=\"amp_compile\",
+            label=\"Right-side mode\",
+            scale=2,\n+        )
 
-        with gr.Column(scale=3, min_width=900):
-            with gr.Row():
-                out_left = gr.Video(label="Eager", autoplay=True, loop=True)
-                out_right = gr.Video(label="Right-side output", autoplay=True, loop=True)
+    # Big side-by-side video outputs
+    with gr.Row():
+        out_left = gr.Video(label=\"Eager\", autoplay=True, loop=True)
+        out_right = gr.Video(label=\"Right-side output\", autoplay=True, loop=True)
 
     # Auto-run after upload; also rerun when mode/model changes (if upload exists).
     upload.change(
