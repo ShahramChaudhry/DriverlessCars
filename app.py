@@ -197,17 +197,9 @@ _bench_philosophy = (
 )
 
 with gr.Blocks(
-    title="Driverless Car Perception — Side-by-side Demo",
+    title="Side-by-side demo",
     theme=gr.themes.Soft(),
 ) as demo:
-
-    gr.Markdown(
-        f"# Driverless Car Perception — Side-by-side Demo\n"
-        f"**Device:** {_device_label()}  |  "
-        f"**Left:** Eager  |  "
-        f"**Right:** selectable mode  |  "
-        f"**Conf:** {CONF_THRESHOLD}"
-    )
 
     # Controls (single page)
     with gr.Row():
@@ -221,7 +213,7 @@ with gr.Blocks(
             model_weight = gr.Dropdown(
                 choices=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"],
                 value="yolov8n.pt",
-                label="Model Weight",
+                label="Model",
             )
 
             right_mode_choices = [
@@ -230,13 +222,13 @@ with gr.Blocks(
             right_mode = gr.Dropdown(
                 choices=right_mode_choices,
                 value="amp_compile",
-                label="Right-side optimisation mode (left is always eager)",
+                label="Right-side mode",
             )
 
         with gr.Column(scale=3, min_width=900):
             with gr.Row():
-                out_left = gr.Video(label="Left — Eager (FPS overlay)", autoplay=True, loop=True)
-                out_right = gr.Video(label="Right — Selected mode (FPS overlay)", autoplay=True, loop=True)
+                out_left = gr.Video(label="Eager", autoplay=True, loop=True)
+                out_right = gr.Video(label="Right-side output", autoplay=True, loop=True)
 
     # Auto-run after upload; also rerun when mode/model changes (if upload exists).
     upload.change(
@@ -255,14 +247,7 @@ with gr.Blocks(
         outputs=[out_left, out_right],
     )
 
-    gr.Markdown(
-        "---\n"
-        "**Notes**\n"
-        "- Upload once: outputs autoplay + loop side-by-side\n"
-        "- Changing the right-side mode reruns inference on the same video\n"
-        "- `torch.compile()` modes may take minutes on first use (cached afterwards)\n"
-        f"- Max frames per video: `{MAX_DEMO_FRAMES}` (`config.py`)"
-    )
+    # Intentionally minimal UI: no extra benchmark/philosophy text.
 
 
 def _want_gradio_share() -> bool:
