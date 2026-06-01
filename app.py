@@ -212,8 +212,10 @@ _GRADIO_CSS = """
   min-height: 0 !important;
   border-radius: 8px !important;
 }
-.demo-videos { gap: 1rem !important; }
+.demo-videos { gap: 1rem !important; align-items: flex-start !important; }
 .demo-videos .video-container { border-radius: 10px; overflow: hidden; }
+.demo-panel-title { margin: 0 0 0.35rem 0 !important; font-size: 1rem !important; }
+.demo-panel-title p { margin: 0 !important; opacity: 0.92; }
 """
 
 with gr.Blocks(
@@ -255,16 +257,12 @@ Upload a driving clip, pick a mode on the right, and both panels re-run automati
         )
 
     with gr.Row(elem_classes=["demo-videos"]):
-        out_left = gr.Video(
-            label="Left — Eager (baseline)",
-            autoplay=True,
-            loop=True,
-        )
-        out_right = gr.Video(
-            label="Right — optimized mode",
-            autoplay=True,
-            loop=True,
-        )
+        with gr.Column():
+            gr.Markdown("**Left — Eager (baseline)**", elem_classes=["demo-panel-title"])
+            out_left = gr.Video(autoplay=True, loop=True, show_label=False)
+        with gr.Column():
+            gr.Markdown("**Right — optimized mode**", elem_classes=["demo-panel-title"])
+            out_right = gr.Video(autoplay=True, loop=True, show_label=False)
 
     _demo_inputs = [upload, right_mode]
     _demo_outputs = [out_left, out_right]

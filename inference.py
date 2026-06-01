@@ -357,29 +357,17 @@ def _opencv_safe_text(text: str) -> str:
     return text.encode("ascii", errors="replace").decode("ascii")
 
 
-def _overlay_text_top_left(frame_bgr: np.ndarray, text: str) -> np.ndarray:
+def _overlay_text_bottom_left(frame_bgr: np.ndarray, text: str) -> np.ndarray:
+    """Draw HUD at bottom-left so Gradio video chrome does not cover FPS."""
     out = frame_bgr.copy()
     text = _opencv_safe_text(text)
-    cv2.putText(
-        out,
-        text,
-        (12, 32),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.9,
-        (0, 0, 0),
-        4,
-        cv2.LINE_AA,
-    )
-    cv2.putText(
-        out,
-        text,
-        (12, 32),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.9,
-        (255, 255, 255),
-        2,
-        cv2.LINE_AA,
-    )
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale, thickness = 0.9, 2
+    (_, th), baseline = cv2.getTextSize(text, font, scale, thickness)
+    x = 12
+    y = out.shape[0] - 16 - baseline
+    cv2.putText(out, text, (x, y), font, scale, (0, 0, 0), 4, cv2.LINE_AA)
+    cv2.putText(out, text, (x, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
     return out
 
 
@@ -420,7 +408,7 @@ def run_video_inference_with_fps_overlay(
         fps_inst = 1.0 / dt
         ema_fps = fps_inst if ema_fps is None else (0.9 * ema_fps + 0.1 * fps_inst)
 
-        ann = _overlay_text_top_left(ann, f"{overlay_label} | FPS: {ema_fps:.1f}")
+        ann = _overlay_text_bottom_left(ann, f"{overlay_label} | FPS: {ema_fps:.1f}")
         annotated.append(ann)
 
     return annotated
