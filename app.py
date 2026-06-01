@@ -237,27 +237,32 @@ def side_by_side_videos(
     progress(0.38, desc=f"Benchmarking {mode_right} ...")
     metrics_right = _collect_benchmark_metrics(bundle_right, mode_right, tensors)
 
+    # Overlay uses per-frame forward+NMS; warm up at batch 1 (separate from batched JSON bench).
+    scope_overlay = "forward+nms"
+    warmup_model(
+        bundle_eager,
+        tensors,
+        warmup_frames=_warmup_frames_for_mode("eager"),
+        batch_size=1,
+        timing_scope=scope_overlay,
+    )
+    warmup_model(
+        bundle_right,
+        tensors,
+        warmup_frames=_warmup_frames_for_mode(mode_right),
+        batch_size=1,
+        timing_scope=scope_overlay,
+    )
+
     progress(0.42, desc="Running Eager video inference ...")
     eager_frames = run_video_inference_with_fps_overlay(
-        bundle_eager,
-        raw_frames,
-        tensors,
-        shapes,
-        ratios,
-        pads,
-        bench_fps=float(metrics_eager["fps"]),
+        bundle_eager, raw_frames, tensors, shapes, ratios, pads
     )
 
     mode_name = OPTIMIZATION_MODES.get(mode_right, {}).get("overlay_label", mode_right)
     progress(0.65, desc=f"Running {mode_name} video inference ...")
     right_frames = run_video_inference_with_fps_overlay(
-        bundle_right,
-        raw_frames,
-        tensors,
-        shapes,
-        ratios,
-        pads,
-        bench_fps=float(metrics_right["fps"]),
+        bundle_right, raw_frames, tensors, shapes, ratios, pads
     )
 
     progress(0.90, desc="Saving output videos ...")
@@ -328,7 +333,7 @@ with gr.Blocks(
 
 Compare **YOLOv8n** side by side: **Eager** (left) vs an optimized mode (right).
 
-On-video and JSON both show **bench FPS** — CUDA-timed throughput at **batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}**, **{SIDE_BY_SIDE_BENCH_SCOPE} only** (after warmup).
+**On-video FPS** updates each frame (per-frame forward + NMS). **JSON below** is batched throughput at **batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}**, **{SIDE_BY_SIDE_BENCH_SCOPE}** — use that to compare acceleration.
 
 {_device_label()} · Model: `{MODEL_WEIGHT}` · Max {MAX_DEMO_FRAMES} frames per clip
 

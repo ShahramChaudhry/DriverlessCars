@@ -177,6 +177,8 @@ strategy as building gpu_batches in the ResNet50 benchmark.
 """
 from __future__ import annotations
 
+import time
+
 import cv2
 import numpy as np
 import torch
@@ -383,22 +385,31 @@ def run_video_inference_with_fps_overlay(
     shapes: list,
     ratios: list,
     pads: list,
-    *,
-    bench_fps: float,
 ) -> list[np.ndarray]:
-    """Annotated pass with benchmark FPS on each frame (matches JSON below video)."""
-    hud = f"FPS: {bench_fps:.1f}"
+    """Annotated pass; overlay shows per-frame FPS (EMA of forward + NMS)."""
     annotated: list[np.ndarray] = []
+    ema_fps: float | None = None
 
     for frame, t, orig_shape in zip(raw_frames, tensors, shapes):
+        if DEVICE.type == "cuda":
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+
         pred = _forward(bundle, t)
         det = nms.non_max_suppression(
             pred,
             conf_thres=CONF_THRESHOLD,
             iou_thres=IOU_THRESHOLD,
         )[0]
+
+        if DEVICE.type == "cuda":
+            torch.cuda.synchronize()
+        dt = max(time.perf_counter() - t0, 1e-9)
+        fps_inst = 1.0 / dt
+        ema_fps = fps_inst if ema_fps is None else (0.85 * ema_fps + 0.15 * fps_inst)
+
         ann = annotate_frame(frame, det, bundle.names, orig_shape)
-        annotated.append(_overlay_text_bottom_left(ann, hud))
+        annotated.append(_overlay_text_bottom_left(ann, f"FPS: {ema_fps:.1f}"))
 
     return annotated
 
