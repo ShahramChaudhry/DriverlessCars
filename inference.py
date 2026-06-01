@@ -384,12 +384,10 @@ def run_video_inference_with_fps_overlay(
     ratios: list,
     pads: list,
     *,
-    overlay_label: str,
     bench_fps: float,
-    bench_caption: str = "batch 64, forward only",
 ) -> list[np.ndarray]:
-    """Annotated pass with batched benchmark FPS on each frame (matches JSON below video)."""
-    hud = f"{overlay_label} | bench: {bench_fps:.0f} FPS ({bench_caption})"
+    """Annotated pass with benchmark FPS on each frame (matches JSON below video)."""
+    hud = f"FPS: {bench_fps:.1f}"
     annotated: list[np.ndarray] = []
 
     for frame, t, orig_shape in zip(raw_frames, tensors, shapes):

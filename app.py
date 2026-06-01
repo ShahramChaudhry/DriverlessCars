@@ -206,7 +206,7 @@ def side_by_side_videos(
     video_path: str | None,
     mode_right: str,
     progress=gr.Progress(),
-) -> tuple[str | None, str | None, dict | None, dict | None]:
+) -> tuple[str | None, str | None, dict | None, dict | None, str]:
     """
     Produce two output videos side-by-side (looping in UI):
       - Left: eager
@@ -214,12 +214,12 @@ def side_by_side_videos(
     Each output has a per-frame (EMA) FPS overlay plus benchmark JSON below.
     """
     if video_path is None:
-        return None, None, None, None
+        return None, None, None, None, _right_panel_title(mode_right)
 
     progress(0.05, desc="Loading & preprocessing frames ...")
     raw_frames, tensors, shapes, ratios, pads, fps, _ = load_video_frames(video_path)
     if not tensors:
-        return None, None, None, None
+        return None, None, None, None, _right_panel_title(mode_right)
 
     progress(0.15, desc="Loading models (cached) ...")
     bundle_eager = _get_model("eager", MODEL_WEIGHT)
@@ -245,9 +245,7 @@ def side_by_side_videos(
         shapes,
         ratios,
         pads,
-        overlay_label="Eager",
-        bench_fps=metrics_eager.get("fps"),
-        bench_caption=f"batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}, {SIDE_BY_SIDE_BENCH_SCOPE} only",
+        bench_fps=float(metrics_eager["fps"]),
     )
 
     mode_name = OPTIMIZATION_MODES.get(mode_right, {}).get("overlay_label", mode_right)
@@ -259,11 +257,7 @@ def side_by_side_videos(
         shapes,
         ratios,
         pads,
-        overlay_label=OPTIMIZATION_MODES.get(mode_right, {}).get(
-            "overlay_label", mode_right
-        ),
-        bench_fps=metrics_right.get("fps"),
-        bench_caption=f"batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}, {SIDE_BY_SIDE_BENCH_SCOPE} only",
+        bench_fps=float(metrics_right["fps"]),
     )
 
     progress(0.90, desc="Saving output videos ...")
@@ -273,13 +267,18 @@ def side_by_side_videos(
     save_video(right_frames, out_b, fps)
 
     progress(1.0, desc="Done!")
-    return out_a, out_b, metrics_eager, metrics_right
+    return out_a, out_b, metrics_eager, metrics_right, _right_panel_title(mode_right)
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
 def _device_label() -> str:
     if DEVICE.type == "cuda":
         return f"**Device:** {torch.cuda.get_device_name(0)} (CUDA)"
     return "**Device:** CPU — compile and AMP modes may fall back to eager"
+
+
+def _right_panel_title(mode_key: str) -> str:
+    label = OPTIMIZATION_MODES.get(mode_key, {}).get("label", mode_key)
+    return f"**Right — {label}**"
 
 
 def _right_mode_dropdown_choices() -> list[tuple[str, str]]:
@@ -360,12 +359,15 @@ Upload a driving clip, pick a mode on the right, and both panels re-run automati
             out_left = gr.Video(autoplay=True, loop=True, show_label=False)
             bench_left = gr.JSON(label="Benchmark metrics")
         with gr.Column():
-            gr.Markdown("**Right — optimized mode**", elem_classes=["demo-panel-title"])
+            right_title = gr.Markdown(
+                _right_panel_title(DEFAULT_COMPARE_MODE),
+                elem_classes=["demo-panel-title"],
+            )
             out_right = gr.Video(autoplay=True, loop=True, show_label=False)
             bench_right = gr.JSON(label="Benchmark metrics")
 
     _demo_inputs = [upload, right_mode]
-    _demo_outputs = [out_left, out_right, bench_left, bench_right]
+    _demo_outputs = [out_left, out_right, bench_left, bench_right, right_title]
 
     upload.upload(fn=side_by_side_videos, inputs=_demo_inputs, outputs=_demo_outputs)
     right_mode.change(fn=side_by_side_videos, inputs=_demo_inputs, outputs=_demo_outputs)
