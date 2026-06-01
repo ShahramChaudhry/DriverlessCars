@@ -16,8 +16,8 @@ import tempfile
 import gradio as gr
 import torch
 
-from config       import DEVICE, WARMUP_FRAMES, BENCHMARK_REPEATS, MAX_DEMO_FRAMES, CONF_THRESHOLD
-from model_loader import load_model, OPTIMIZATION_MODES
+from config       import DEVICE, MODEL_WEIGHT, WARMUP_FRAMES, BENCHMARK_REPEATS, MAX_DEMO_FRAMES, CONF_THRESHOLD
+from model_loader import load_model, OPTIMIZATION_MODES, DEFAULT_COMPARE_MODE
 from inference    import (
     load_video_frames,
     run_video_inference,
@@ -122,7 +122,6 @@ def run_demo(
 
 def side_by_side_videos(
     video_path: str | None,
-    model_weight: str,
     mode_right: str,
     progress=gr.Progress(),
 ) -> tuple[str | None, str | None]:
@@ -141,8 +140,8 @@ def side_by_side_videos(
         return None, None
 
     progress(0.15, desc="Loading models (cached) ...")
-    bundle_eager = _get_model("eager", model_weight)
-    bundle_right = _get_model(mode_right, model_weight)
+    bundle_eager = _get_model("eager", MODEL_WEIGHT)
+    bundle_right = _get_model(mode_right, MODEL_WEIGHT)
 
     progress(0.30, desc="Running Eager video inference ...")
     eager_frames = run_video_inference_with_fps_overlay(
@@ -155,7 +154,8 @@ def side_by_side_videos(
         overlay_label="Eager",
     )
 
-    progress(0.65, desc=f"Running {mode_right} video inference ...")
+    mode_name = OPTIMIZATION_MODES.get(mode_right, {}).get("overlay_label", mode_right)
+    progress(0.65, desc=f"Running {mode_name} video inference ...")
     right_frames = run_video_inference_with_fps_overlay(
         bundle_right,
         raw_frames,
@@ -180,87 +180,97 @@ def side_by_side_videos(
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
 def _device_label() -> str:
     if DEVICE.type == "cuda":
-        return f"GPU — {torch.cuda.get_device_name(0)}"
-    return "CPU  (no CUDA GPU — compile modes and AMP fall back to eager / off)"
+        return f"**Device:** {torch.cuda.get_device_name(0)} (CUDA)"
+    return "**Device:** CPU — compile and AMP modes may fall back to eager"
 
 
-_mode_table = "| Mode key | Backend |\n|---|---|\n" + "\n".join(
-    f"| `{k}` | {v['label']} |" for k, v in OPTIMIZATION_MODES.items()
-)
+def _right_mode_dropdown_choices() -> list[tuple[str, str]]:
+    """(visible label, registry key) for the right-hand comparison dropdown."""
+    out: list[tuple[str, str]] = []
+    for key, cfg in OPTIMIZATION_MODES.items():
+        if key == "eager":
+            continue
+        label = cfg["label"]
+        if cfg.get("ui_default"):
+            label = f"{label} (default)"
+        out.append((label, key))
+    return out
 
-_bench_philosophy = (
-    "> **Benchmark philosophy** (mirrors ResNet50 GPU experiment): "
-    "model load & compile time excluded · "
-    f"{WARMUP_FRAMES} warmup frames discarded · "
-    "first timed run discarded · "
-    "CUDA events for timing on GPU; wall-clock on CPU · "
-    "NMS included in timing · "
-    f"max {MAX_DEMO_FRAMES} frames per video"
-)
 
-_GRADIO_CSS = (
-    ".small-upload button {"
-    "  padding: 6px 10px !important;"
-    "  font-size: 13px !important;"
-    "  min-height: 0 !important;"
-    "}"
-)
+_GRADIO_CSS = """
+.demo-wrap { max-width: 1200px; margin: 0 auto; }
+.demo-header { margin-bottom: 0.25rem !important; }
+.demo-header p { opacity: 0.88; line-height: 1.5; }
+.demo-controls {
+  align-items: flex-end;
+  gap: 1rem;
+  margin: 0.75rem 0 1rem 0 !important;
+}
+.demo-controls .small-upload button {
+  padding: 0.55rem 1.1rem !important;
+  font-size: 0.95rem !important;
+  min-height: 0 !important;
+  border-radius: 8px !important;
+}
+.demo-videos { gap: 1rem !important; }
+.demo-videos .video-container { border-radius: 10px; overflow: hidden; }
+"""
 
 with gr.Blocks(
-    title="Side-by-side demo",
+    title="Driverless Cars — Perception Demo",
     theme=gr.themes.Soft(),
     css=_GRADIO_CSS,
+    elem_classes=["demo-wrap"],
 ) as demo:
 
-    # Top controls row (small upload button, above videos)
-    with gr.Row():
+    gr.Markdown(
+        f"""
+# Driverless Cars — real-time perception demo
+
+Compare **YOLOv8n** object detection side by side: a fixed **eager FP32 baseline** (left) vs an
+**optimized mode** you choose (right). Each video shows live **FPS** on the frame so you can see
+throughput differences while boxes are drawn on cars, pedestrians, and other COCO classes.
+
+{_device_label()} · Model: `{MODEL_WEIGHT}` · Max {MAX_DEMO_FRAMES} frames per clip
+
+Upload a driving clip, pick a mode on the right, and both panels re-run automatically.
+        """,
+        elem_classes=["demo-header"],
+    )
+
+    with gr.Row(elem_classes=["demo-controls"]):
         upload = gr.UploadButton(
             "Upload video",
             file_types=["video"],
             file_count="single",
             type="filepath",
             elem_classes=["small-upload"],
-        )
-        model_weight = gr.Dropdown(
-            choices=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"],
-            value="yolov8n.pt",
-            label="Model",
             scale=1,
         )
-
-        right_mode_choices = [
-            (v["label"], k) for k, v in OPTIMIZATION_MODES.items() if k != "eager"
-        ]
         right_mode = gr.Dropdown(
-            choices=right_mode_choices,
-            value="amp_compile",
-            label="Right-side mode",
+            choices=_right_mode_dropdown_choices(),
+            value=DEFAULT_COMPARE_MODE,
+            label="Right panel mode",
             scale=2,
         )
 
-    # Big side-by-side video outputs
-    with gr.Row():
-        out_left = gr.Video(label="Eager", autoplay=True, loop=True)
-        out_right = gr.Video(label="Right-side output", autoplay=True, loop=True)
+    with gr.Row(elem_classes=["demo-videos"]):
+        out_left = gr.Video(
+            label="Left — Eager (baseline)",
+            autoplay=True,
+            loop=True,
+        )
+        out_right = gr.Video(
+            label="Right — optimized mode",
+            autoplay=True,
+            loop=True,
+        )
 
-    # Auto-run after upload; also rerun when mode/model changes (if upload exists).
-    upload.upload(
-        fn=side_by_side_videos,
-        inputs=[upload, model_weight, right_mode],
-        outputs=[out_left, out_right],
-    )
-    model_weight.change(
-        fn=side_by_side_videos,
-        inputs=[upload, model_weight, right_mode],
-        outputs=[out_left, out_right],
-    )
-    right_mode.change(
-        fn=side_by_side_videos,
-        inputs=[upload, model_weight, right_mode],
-        outputs=[out_left, out_right],
-    )
+    _demo_inputs = [upload, right_mode]
+    _demo_outputs = [out_left, out_right]
 
-    # Intentionally minimal UI: no extra benchmark/philosophy text.
+    upload.upload(fn=side_by_side_videos, inputs=_demo_inputs, outputs=_demo_outputs)
+    right_mode.change(fn=side_by_side_videos, inputs=_demo_inputs, outputs=_demo_outputs)
 
 
 def _want_gradio_share() -> bool:

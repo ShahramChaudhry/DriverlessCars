@@ -18,40 +18,43 @@ OPTIMIZATION_MODES: dict[str, dict] = {
     "eager": {
         "use_amp":      False,
         "compile_mode": None,
-        "label":        "Eager (FP32, no torch.compile)",
+        "label":        "Eager",
         "overlay_label": "Eager",
     },
     "torch_compile": {
         "use_amp":      False,
         "compile_mode": "max-autotune-no-cudagraphs",
-        "label":        "torch.compile() — FP32 · max-autotune-no-cudagraphs",
-        "overlay_label": "torch.compile FP32",
+        "label":        "torch.compile()",
+        "overlay_label": "torch.compile()",
     },
     "amp": {
         "use_amp":      True,
         "compile_mode": None,
-        "label":        "AMP only (no torch.compile)",
+        "label":        "AMP",
         "overlay_label": "AMP",
     },
     "amp_compile": {
         "use_amp":      True,
         "compile_mode": "max-autotune-no-cudagraphs",
-        "label":        "AMP + torch.compile() · max-autotune-no-cudagraphs",
-        "overlay_label": "AMP + torch.compile",
+        "label":        "AMP + torch.compile()",
+        "overlay_label": "AMP + torch.compile()",
+        "ui_default":   True,
     },
     "structured_prune": {
         "use_amp":      False,
         "compile_mode": None,
-        "label":        "Structured prune — torch-pruning magnitude (no torch.compile)",
-        "overlay_label": "Structured prune",
+        "label":        "Structured pruning",
+        "overlay_label": "Structured pruning",
     },
     "unstructured_prune": {
         "use_amp":      False,
         "compile_mode": None,
-        "label":        "Unstructured prune — L1 Conv2d/Linear (no torch.compile)",
-        "overlay_label": "Unstructured prune",
+        "label":        "Unstructured pruning",
+        "overlay_label": "Unstructured pruning",
     },
 }
+
+DEFAULT_COMPARE_MODE = "amp_compile"
 
 
 @dataclass
