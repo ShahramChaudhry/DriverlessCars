@@ -336,7 +336,7 @@ with gr.Blocks(
 
 Compare **YOLOv8n** side by side: **Eager** (left) vs an optimized mode (right).
 
-**On-video FPS** and **JSON** both use batched **forward-only** throughput (batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}) — updates each batch (~every 64 frames). Not per-frame latency (that would read ~10–70 FPS).
+**On-video FPS** updates every frame (forward only, smoothed). **JSON** is peak batched throughput (batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}) — higher numbers, same trend (right faster than left).
 
 {_device_label()} · Model: `{MODEL_WEIGHT}` · Max {MAX_DEMO_FRAMES} frames per clip
 

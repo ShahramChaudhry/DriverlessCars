@@ -192,8 +192,7 @@ from config import (
     CONF_THRESHOLD,
     IOU_THRESHOLD,
     MAX_DEMO_FRAMES,
-    OVERLAY_FPS_BATCH_SIZE,
-    OVERLAY_FPS_BATCH_SKIP,
+    OVERLAY_FPS_DISPLAY_SKIP,
 )
 from model_loader import ModelBundle
 
@@ -395,71 +394,45 @@ def run_video_inference_with_fps_overlay(
     pads: list,
     *,
     untimed_warmup_frames: int = 0,
-    batch_size: int | None = None,
 ) -> list[np.ndarray]:
     """
-    Annotated pass with live FPS overlay (throughput FPS, same idea as JSON benchmark).
+    Live FPS overlay — updates every frame (EMA).
 
-    Times batched forward only (default batch 64). NMS + drawing happen after the timer.
-    Per-batch throughput = batch_len / forward_time, smoothed with EMA across batches.
+    Times forward pass only per frame; NMS + annotation are after the timer.
+    JSON below still reports batched throughput (batch 64), which reads much higher.
     """
     annotated: list[np.ndarray] = []
     ema_fps: float | None = None
-    timed_batches = 0
-    bs = min(int(batch_size or OVERLAY_FPS_BATCH_SIZE), len(tensors))
-    bs = max(1, bs)
-    # Leave at least one timed batch (100 frames / batch 64 => only 2 batches total).
-    n_untimed = min(int(untimed_warmup_frames), max(0, len(tensors) - bs))
+    n_untimed = min(int(untimed_warmup_frames), max(0, len(tensors) - 1))
+    timed_frames = 0
 
-    i = 0
-    while i < len(tensors):
-        j = min(i + bs, len(tensors))
-        batch_t = tensors[i:j]
-        batch_frames = raw_frames[i:j]
-        batch_shapes = shapes[i:j]
-        n = j - i
+    for i, (frame, t, orig_shape) in enumerate(zip(raw_frames, tensors, shapes)):
         measure = i >= n_untimed
-
-        batch = torch.cat(batch_t, dim=0)
 
         if measure:
             if DEVICE.type == "cuda":
                 torch.cuda.synchronize()
             t0 = time.perf_counter()
-            pred = _forward(bundle, batch)
+            pred = _forward(bundle, t)
             if DEVICE.type == "cuda":
                 torch.cuda.synchronize()
             dt = max(time.perf_counter() - t0, 1e-9)
-            batch_fps = n / dt
-            ema_fps = (
-                batch_fps
-                if ema_fps is None
-                else (0.75 * ema_fps + 0.25 * batch_fps)
-            )
-            timed_batches += 1
+            fps_inst = 1.0 / dt
+            ema_fps = fps_inst if ema_fps is None else (0.8 * ema_fps + 0.2 * fps_inst)
+            timed_frames += 1
         else:
-            pred = _forward(bundle, batch)
+            pred = _forward(bundle, t)
 
-        # NMS + annotation are outside the timer (matches JSON benchmark scope).
-        dets = nms.non_max_suppression(
+        det = nms.non_max_suppression(
             pred,
             conf_thres=CONF_THRESHOLD,
             iou_thres=IOU_THRESHOLD,
-        )
+        )[0]
 
-        show_fps = (
-            ema_fps is not None
-            and timed_batches > OVERLAY_FPS_BATCH_SKIP
-        )
-        hud = f"FPS: {ema_fps:.0f}" if show_fps else None
-
-        for frame, orig_shape, det in zip(batch_frames, batch_shapes, dets):
-            ann = annotate_frame(frame, det, bundle.names, orig_shape)
-            if hud:
-                ann = _overlay_text_bottom_left(ann, hud)
-            annotated.append(ann)
-
-        i = j
+        ann = annotate_frame(frame, det, bundle.names, orig_shape)
+        if measure and ema_fps is not None and timed_frames > OVERLAY_FPS_DISPLAY_SKIP:
+            ann = _overlay_text_bottom_left(ann, f"FPS: {ema_fps:.1f}")
+        annotated.append(ann)
 
     return annotated
 

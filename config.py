@@ -21,12 +21,10 @@ SIDE_BY_SIDE_BENCH_SCOPE      = "forward"  # use "forward+nms" to include NMS in
 COMPILE_BENCHMARK_DISCARD_RUNS = 2   # torch.compile: 2nd timed run can still be autotuning
 COMPILE_BENCHMARK_REPEATS      = 7   # extra timed runs so enough remain after discard
 
-# On-video FPS uses same batched forward throughput as JSON benchmark (not per-frame batch=1)
-OVERLAY_FPS_BATCH_SIZE         = SIDE_BY_SIDE_BENCH_BATCH_SIZE
-OVERLAY_FPS_SCOPE              = SIDE_BY_SIDE_BENCH_SCOPE  # "forward" — NMS/annotate after timer
+# On-video: per-frame forward-only EMA (updates every frame). JSON: batched throughput (batch 64).
 OVERLAY_UNTIMED_WARMUP_FRAMES  = 10
 COMPILE_OVERLAY_UNTIMED_WARMUP = 25
-OVERLAY_FPS_BATCH_SKIP         = 0    # 100-frame clips only get ~2 batches; must show after 1st timed
+OVERLAY_FPS_DISPLAY_SKIP       = 2    # timed frames before showing EMA
 
 # Pruning (structured / unstructured modes) — stronger default so effects show up in benchmarks
 PRUNE_RATIO = 0.50
