@@ -177,8 +177,6 @@ strategy as building gpu_batches in the ResNet50 benchmark.
 """
 from __future__ import annotations
 
-import time
-
 import cv2
 import numpy as np
 import torch
