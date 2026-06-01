@@ -19,31 +19,37 @@ OPTIMIZATION_MODES: dict[str, dict] = {
         "use_amp":      False,
         "compile_mode": None,
         "label":        "Eager (FP32, no torch.compile)",
+        "overlay_label": "Eager",
     },
     "torch_compile": {
         "use_amp":      False,
         "compile_mode": "max-autotune-no-cudagraphs",
         "label":        "torch.compile() — FP32 · max-autotune-no-cudagraphs",
+        "overlay_label": "torch.compile FP32",
     },
     "amp": {
         "use_amp":      True,
         "compile_mode": None,
         "label":        "AMP only (no torch.compile)",
+        "overlay_label": "AMP",
     },
     "amp_compile": {
         "use_amp":      True,
         "compile_mode": "max-autotune-no-cudagraphs",
         "label":        "AMP + torch.compile() · max-autotune-no-cudagraphs",
+        "overlay_label": "AMP + torch.compile",
     },
     "structured_prune": {
         "use_amp":      False,
         "compile_mode": None,
         "label":        "Structured prune — torch-pruning magnitude (no torch.compile)",
+        "overlay_label": "Structured prune",
     },
     "unstructured_prune": {
         "use_amp":      False,
         "compile_mode": None,
         "label":        "Unstructured prune — L1 Conv2d/Linear (no torch.compile)",
+        "overlay_label": "Unstructured prune",
     },
 }
 

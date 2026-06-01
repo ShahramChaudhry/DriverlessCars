@@ -351,8 +351,15 @@ def run_video_inference(
     return annotated
 
 
+def _opencv_safe_text(text: str) -> str:
+    """cv2.putText only renders Hershey ASCII reliably (no em-dash, middle dot, etc.)."""
+    text = text.replace("\u2014", "-").replace("\u2013", "-").replace("\u00b7", ",")
+    return text.encode("ascii", errors="replace").decode("ascii")
+
+
 def _overlay_text_top_left(frame_bgr: np.ndarray, text: str) -> np.ndarray:
     out = frame_bgr.copy()
+    text = _opencv_safe_text(text)
     cv2.putText(
         out,
         text,

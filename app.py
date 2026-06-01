@@ -163,7 +163,9 @@ def side_by_side_videos(
         shapes,
         ratios,
         pads,
-        overlay_label=OPTIMIZATION_MODES.get(mode_right, {}).get("label", mode_right),
+        overlay_label=OPTIMIZATION_MODES.get(mode_right, {}).get(
+            "overlay_label", mode_right
+        ),
     )
 
     progress(0.90, desc="Saving output videos ...")
