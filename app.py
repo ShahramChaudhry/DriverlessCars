@@ -196,16 +196,18 @@ _bench_philosophy = (
     f"max {MAX_DEMO_FRAMES} frames per video"
 )
 
+_GRADIO_CSS = (
+    ".small-upload button {"
+    "  padding: 6px 10px !important;"
+    "  font-size: 13px !important;"
+    "  min-height: 0 !important;"
+    "}"
+)
+
 with gr.Blocks(
     title="Side-by-side demo",
     theme=gr.themes.Soft(),
-    css="""
-    .small-upload button {
-      padding: 6px 10px !important;
-      font-size: 13px !important;
-      min-height: 0 !important;
-    }
-    """,
+    css=_GRADIO_CSS,
 ) as demo:
 
     # Top controls row (small upload button, above videos)
@@ -277,7 +279,7 @@ def _want_gradio_share() -> bool:
 
 
 def launch_gradio(*, share: bool | None = None) -> None:
-    """Start the Gradio server (used by `python app.py` and Colab notebooks)."""
+    """Start the Gradio server (used by python app.py and Colab notebooks)."""
     if share is None:
         share = _want_gradio_share()
     demo.launch(
