@@ -26,6 +26,8 @@ from config       import (
     CONF_THRESHOLD,
     SIDE_BY_SIDE_BENCH_BATCH_SIZE,
     SIDE_BY_SIDE_BENCH_SCOPE,
+    COMPILE_BENCHMARK_DISCARD_RUNS,
+    COMPILE_BENCHMARK_REPEATS,
 )
 from model_loader import load_model, OPTIMIZATION_MODES, DEFAULT_COMPARE_MODE
 from inference    import (
@@ -34,7 +36,7 @@ from inference    import (
     run_video_inference_with_fps_overlay,
     save_video,
 )
-from benchmark    import warmup_model, benchmark_video
+from benchmark    import warmup_model, warmup_full_video_passes, benchmark_video
 
 
 def _mode_radio_choices() -> list[tuple[str, str]]:
@@ -63,19 +65,47 @@ def _warmup_frames_for_mode(mode: str) -> int:
     return WARMUP_FRAMES
 
 
+def _bench_batch_size(num_frames: int) -> int:
+    return min(SIDE_BY_SIDE_BENCH_BATCH_SIZE, num_frames)
+
+
+def _benchmark_discard_runs(mode_key: str) -> int:
+    if OPTIMIZATION_MODES.get(mode_key, {}).get("compile_mode"):
+        return COMPILE_BENCHMARK_DISCARD_RUNS
+    return 1
+
+
+def _benchmark_repeats(mode_key: str) -> int:
+    if OPTIMIZATION_MODES.get(mode_key, {}).get("compile_mode"):
+        return max(BENCHMARK_REPEATS, COMPILE_BENCHMARK_REPEATS)
+    return BENCHMARK_REPEATS
+
+
+def _warmup_for_benchmark(bundle, mode_key: str, tensors: list) -> None:
+    """Warm up at the same batch size / scope as the JSON benchmark."""
+    bs = _bench_batch_size(len(tensors))
+    scope = SIDE_BY_SIDE_BENCH_SCOPE
+    n = _warmup_frames_for_mode(mode_key)
+    warmup_model(bundle, tensors, warmup_frames=n, batch_size=bs, timing_scope=scope)
+    if OPTIMIZATION_MODES.get(mode_key, {}).get("compile_mode"):
+        warmup_full_video_passes(bundle, tensors, passes=3, batch_size=bs, timing_scope=scope)
+
+
 def _collect_benchmark_metrics(
     bundle,
     mode_key: str,
     tensors: list,
 ) -> dict:
-    """CUDA-event benchmark after warmup; first timed run discarded."""
-    batch_size = min(SIDE_BY_SIDE_BENCH_BATCH_SIZE, len(tensors))
+    """CUDA-event benchmark after warmup; compile modes discard extra cold timed runs."""
+    batch_size = _bench_batch_size(len(tensors))
+    discard = _benchmark_discard_runs(mode_key)
     metrics = benchmark_video(
         bundle,
         tensors,
-        repeats=BENCHMARK_REPEATS,
+        repeats=_benchmark_repeats(mode_key),
         batch_size=batch_size,
         timing_scope=SIDE_BY_SIDE_BENCH_SCOPE,
+        discard_runs=discard,
     )
     n_warm = _warmup_frames_for_mode(mode_key)
     metrics.update(
@@ -85,12 +115,12 @@ def _collect_benchmark_metrics(
             "model_weight": MODEL_WEIGHT,
             "warmup_frames": n_warm,
             "benchmark_note": (
-                f"Timing scope: {SIDE_BY_SIDE_BENCH_SCOPE}. "
+                f"Timing scope: {SIDE_BY_SIDE_BENCH_SCOPE}, batch_size={batch_size}. "
                 "Preprocessing excluded (pre-loaded to GPU). "
-                f"Warmup: {n_warm} frames. "
-                "First timed run discarded (mirrors ResNet benchmark)."
+                f"Warmup at benchmark batch size (+ full-video passes for compile). "
+                f"First {discard} timed run(s) discarded. "
+                "fps uses median of remaining runs (steady state)."
             ),
-            "fps": round(metrics["fps"], 2),
             "mean_seconds": round(metrics["mean_seconds"], 6),
             "median_seconds": round(metrics["median_seconds"], 6),
         }
@@ -195,12 +225,29 @@ def side_by_side_videos(
     bundle_eager = _get_model("eager", MODEL_WEIGHT)
     bundle_right = _get_model(mode_right, MODEL_WEIGHT)
 
-    progress(0.22, desc=f"Warming up Eager ({_warmup_frames_for_mode('eager')} frames, not in FPS) ...")
-    warmup_model(bundle_eager, tensors, warmup_frames=_warmup_frames_for_mode("eager"))
+    progress(0.22, desc="Warming up Eager (benchmark batch size) ...")
+    _warmup_for_benchmark(bundle_eager, "eager", tensors)
 
-    n_warm = _warmup_frames_for_mode(mode_right)
-    progress(0.28, desc=f"Warming up {mode_right} ({n_warm} frames, not in FPS) ...")
-    warmup_model(bundle_right, tensors, warmup_frames=n_warm)
+    progress(0.28, desc=f"Warming up {mode_right} (benchmark batch size) ...")
+    _warmup_for_benchmark(bundle_right, mode_right, tensors)
+
+    # Per-frame overlay path (batch=1); separate from batched JSON benchmark.
+    bs1 = 1
+    scope_overlay = "forward+nms"
+    warmup_model(
+        bundle_eager,
+        tensors,
+        warmup_frames=_warmup_frames_for_mode("eager"),
+        batch_size=bs1,
+        timing_scope=scope_overlay,
+    )
+    warmup_model(
+        bundle_right,
+        tensors,
+        warmup_frames=_warmup_frames_for_mode(mode_right),
+        batch_size=bs1,
+        timing_scope=scope_overlay,
+    )
 
     progress(0.32, desc="Benchmarking Eager ...")
     metrics_eager = _collect_benchmark_metrics(bundle_eager, "eager", tensors)

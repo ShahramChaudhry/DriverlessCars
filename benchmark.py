@@ -170,12 +170,41 @@ def warmup_model(
 
 
 @torch.inference_mode()
+def warmup_full_video_passes(
+    bundle: ModelBundle,
+    tensors: list[torch.Tensor],
+    passes: int = 2,
+    batch_size: int = 1,
+    timing_scope: str = "forward+nms",
+) -> None:
+    """Untimed full-video passes at the benchmark batch size (needed for torch.compile shapes)."""
+    bundle.nn_model.eval()
+    batch_size = max(1, int(batch_size))
+    passes = max(1, int(passes))
+
+    for _ in range(passes):
+        for i in range(0, len(tensors), batch_size):
+            batch = torch.cat(tensors[i : i + batch_size], dim=0)
+            pred = _forward(bundle, batch)
+            if timing_scope == "forward+nms":
+                _ = nms.non_max_suppression(
+                    pred,
+                    conf_thres=CONF_THRESHOLD,
+                    iou_thres=IOU_THRESHOLD,
+                )
+
+    if DEVICE.type == "cuda":
+        torch.cuda.synchronize()
+
+
+@torch.inference_mode()
 def benchmark_video(
     bundle: ModelBundle,
     tensors: list[torch.Tensor],
     repeats: int = 5,
     batch_size: int = 1,
     timing_scope: str = "forward+nms",
+    discard_runs: int = 1,
 ) -> dict:
     """
     Benchmark inference on DEVICE-resident video tensors.
@@ -222,10 +251,16 @@ def benchmark_video(
 
         times.append(elapsed)
 
-    valid_times = times[1:] if len(times) > 1 else times
+    discard_runs = max(0, int(discard_runs))
+    valid_times = times[discard_runs:] if len(times) > discard_runs else times
+    if not valid_times:
+        valid_times = times[-1:]
+
     median_t = statistics.median(valid_times)
     mean_t = statistics.mean(valid_times)
-    fps = len(tensors) / mean_t if mean_t > 0 else 0.0
+    # Median reflects steady state after compile; mean is skewed by slow autotune runs.
+    fps = len(tensors) / median_t if median_t > 0 else 0.0
+    fps_mean = len(tensors) / mean_t if mean_t > 0 else 0.0
 
     ms_per_frame_runs = [(t / len(tensors)) * 1000.0 for t in valid_times]
     mean_ms = statistics.mean(ms_per_frame_runs)
@@ -234,10 +269,13 @@ def benchmark_video(
 
     return {
         "runs": times,
+        "runs_discarded": discard_runs,
+        "runs_used": len(valid_times),
         "median_seconds": median_t,
         "mean_seconds": mean_t,
         "frames": len(tensors),
-        "fps": fps,
+        "fps": round(fps, 2),
+        "fps_mean": round(fps_mean, 2),
         "batch_size": batch_size,
         "timing_scope": timing_scope,
         "mean_ms_per_frame": round(mean_ms, 3),

@@ -18,6 +18,8 @@ MAX_DEMO_FRAMES       = 100  # cap keeps VRAM usage ~470 MB and latency manageab
 # Side-by-side panel benchmarks (CUDA-event timing, mirrors run_demo)
 SIDE_BY_SIDE_BENCH_BATCH_SIZE = 64
 SIDE_BY_SIDE_BENCH_SCOPE      = "forward"  # use "forward+nms" to include NMS in timed path
+COMPILE_BENCHMARK_DISCARD_RUNS = 2   # torch.compile: 2nd timed run can still be autotuning
+COMPILE_BENCHMARK_REPEATS      = 7   # extra timed runs so enough remain after discard
 
 # Pruning (structured / unstructured modes) — stronger default so effects show up in benchmarks
 PRUNE_RATIO = 0.50
