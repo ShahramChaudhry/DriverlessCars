@@ -357,17 +357,23 @@ def _opencv_safe_text(text: str) -> str:
     return text.encode("ascii", errors="replace").decode("ascii")
 
 
-def _overlay_text_bottom_left(frame_bgr: np.ndarray, text: str) -> np.ndarray:
-    """Draw HUD at bottom-left so Gradio video chrome does not cover FPS."""
+def _overlay_text_bottom_left(frame_bgr: np.ndarray, lines: str | list[str]) -> np.ndarray:
+    """Draw one or more HUD lines at bottom-left (Gradio chrome stays at top)."""
+    if isinstance(lines, str):
+        lines = [lines]
     out = frame_bgr.copy()
-    text = _opencv_safe_text(text)
     font = cv2.FONT_HERSHEY_SIMPLEX
-    scale, thickness = 0.9, 2
-    (_, th), baseline = cv2.getTextSize(text, font, scale, thickness)
-    x = 12
-    y = out.shape[0] - 16 - baseline
-    cv2.putText(out, text, (x, y), font, scale, (0, 0, 0), 4, cv2.LINE_AA)
-    cv2.putText(out, text, (x, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+    scale, thickness = 0.72, 2
+    line_gap = 6
+    y = out.shape[0] - 14
+
+    for text in reversed([_opencv_safe_text(ln) for ln in lines]):
+        (_, th), baseline = cv2.getTextSize(text, font, scale, thickness)
+        y -= baseline
+        cv2.putText(out, text, (12, y), font, scale, (0, 0, 0), 4, cv2.LINE_AA)
+        cv2.putText(out, text, (12, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+        y -= th + line_gap
+
     return out
 
 
@@ -381,13 +387,14 @@ def run_video_inference_with_fps_overlay(
     pads: list,
     *,
     overlay_label: str,
+    bench_fps: float | None = None,
+    bench_caption: str | None = None,
 ) -> list[np.ndarray]:
     """
     Annotated pass with per-frame FPS overlay (EMA).
 
-    FPS counts GPU forward + NMS only (annotation is drawn after the timer stops)
-    so AMP / torch.compile speedups are visible. Call warmup_model() before this
-    so compile and CUDA kernel setup are not included in the overlay numbers.
+    "live" FPS = one frame at a time, forward + NMS (matches real-time playback).
+    Optional bench_fps line = batched CUDA benchmark from JSON below the video.
     """
     annotated: list[np.ndarray] = []
     ema_fps: float | None = None
@@ -411,7 +418,11 @@ def run_video_inference_with_fps_overlay(
         ema_fps = fps_inst if ema_fps is None else (0.85 * ema_fps + 0.15 * fps_inst)
 
         ann = annotate_frame(frame, det, bundle.names, orig_shape)
-        ann = _overlay_text_bottom_left(ann, f"{overlay_label} | FPS: {ema_fps:.1f}")
+        hud = [f"{overlay_label} | live: {ema_fps:.1f} FPS (1 frame, fwd+NMS)"]
+        if bench_fps is not None:
+            cap = bench_caption or "batch 64, forward only"
+            hud.append(f"bench: {bench_fps:.0f} FPS ({cap})")
+        ann = _overlay_text_bottom_left(ann, hud)
         annotated.append(ann)
 
     return annotated

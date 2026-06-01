@@ -264,6 +264,8 @@ def side_by_side_videos(
         ratios,
         pads,
         overlay_label="Eager",
+        bench_fps=metrics_eager.get("fps"),
+        bench_caption=f"batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}, {SIDE_BY_SIDE_BENCH_SCOPE} only",
     )
 
     mode_name = OPTIMIZATION_MODES.get(mode_right, {}).get("overlay_label", mode_right)
@@ -278,6 +280,8 @@ def side_by_side_videos(
         overlay_label=OPTIMIZATION_MODES.get(mode_right, {}).get(
             "overlay_label", mode_right
         ),
+        bench_fps=metrics_right.get("fps"),
+        bench_caption=f"batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}, {SIDE_BY_SIDE_BENCH_SCOPE} only",
     )
 
     progress(0.90, desc="Saving output videos ...")
@@ -341,10 +345,10 @@ with gr.Blocks(
         f"""
 # Driverless Cars — real-time perception demo
 
-Compare **YOLOv8n** object detection side by side: a fixed **eager FP32 baseline** (left) vs an
-**optimized mode** you choose (right). Each video shows **inference FPS** on the frame (forward + NMS, after warmup). Below each
-panel, **benchmark JSON** reports CUDA-timed throughput (`batch_size={SIDE_BY_SIDE_BENCH_BATCH_SIZE}`,
-scope `{SIDE_BY_SIDE_BENCH_SCOPE}`) after warmup — first timed run discarded.
+Compare **YOLOv8n** side by side: **Eager** (left) vs an optimized mode (right).
+
+- **On-video `live` FPS** — one frame at a time, forward + NMS (like real-time playback).
+- **On-video `bench` FPS** — same number as the JSON below: full clip at **batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}**, **{SIDE_BY_SIDE_BENCH_SCOPE} only** (much higher because the GPU processes 64 frames per launch).
 
 {_device_label()} · Model: `{MODEL_WEIGHT}` · Max {MAX_DEMO_FRAMES} frames per clip
 
