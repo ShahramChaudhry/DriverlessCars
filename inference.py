@@ -387,43 +387,22 @@ def run_video_inference_with_fps_overlay(
     pads: list,
     *,
     overlay_label: str,
-    bench_fps: float | None = None,
-    bench_caption: str | None = None,
+    bench_fps: float,
+    bench_caption: str = "batch 64, forward only",
 ) -> list[np.ndarray]:
-    """
-    Annotated pass with per-frame FPS overlay (EMA).
-
-    "live" FPS = one frame at a time, forward + NMS (matches real-time playback).
-    Optional bench_fps line = batched CUDA benchmark from JSON below the video.
-    """
+    """Annotated pass with batched benchmark FPS on each frame (matches JSON below video)."""
+    hud = f"{overlay_label} | bench: {bench_fps:.0f} FPS ({bench_caption})"
     annotated: list[np.ndarray] = []
-    ema_fps: float | None = None
 
     for frame, t, orig_shape in zip(raw_frames, tensors, shapes):
-        if DEVICE.type == "cuda":
-            torch.cuda.synchronize()
-        t0 = time.perf_counter()
-
         pred = _forward(bundle, t)
         det = nms.non_max_suppression(
             pred,
             conf_thres=CONF_THRESHOLD,
             iou_thres=IOU_THRESHOLD,
         )[0]
-
-        if DEVICE.type == "cuda":
-            torch.cuda.synchronize()
-        dt = max(time.perf_counter() - t0, 1e-9)
-        fps_inst = 1.0 / dt
-        ema_fps = fps_inst if ema_fps is None else (0.85 * ema_fps + 0.15 * fps_inst)
-
         ann = annotate_frame(frame, det, bundle.names, orig_shape)
-        hud = [f"{overlay_label} | live: {ema_fps:.1f} FPS (1 frame, fwd+NMS)"]
-        if bench_fps is not None:
-            cap = bench_caption or "batch 64, forward only"
-            hud.append(f"bench: {bench_fps:.0f} FPS ({cap})")
-        ann = _overlay_text_bottom_left(ann, hud)
-        annotated.append(ann)
+        annotated.append(_overlay_text_bottom_left(ann, hud))
 
     return annotated
 

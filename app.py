@@ -231,24 +231,6 @@ def side_by_side_videos(
     progress(0.28, desc=f"Warming up {mode_right} (benchmark batch size) ...")
     _warmup_for_benchmark(bundle_right, mode_right, tensors)
 
-    # Per-frame overlay path (batch=1); separate from batched JSON benchmark.
-    bs1 = 1
-    scope_overlay = "forward+nms"
-    warmup_model(
-        bundle_eager,
-        tensors,
-        warmup_frames=_warmup_frames_for_mode("eager"),
-        batch_size=bs1,
-        timing_scope=scope_overlay,
-    )
-    warmup_model(
-        bundle_right,
-        tensors,
-        warmup_frames=_warmup_frames_for_mode(mode_right),
-        batch_size=bs1,
-        timing_scope=scope_overlay,
-    )
-
     progress(0.32, desc="Benchmarking Eager ...")
     metrics_eager = _collect_benchmark_metrics(bundle_eager, "eager", tensors)
 
@@ -347,8 +329,7 @@ with gr.Blocks(
 
 Compare **YOLOv8n** side by side: **Eager** (left) vs an optimized mode (right).
 
-- **On-video `live` FPS** — one frame at a time, forward + NMS (like real-time playback).
-- **On-video `bench` FPS** — same number as the JSON below: full clip at **batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}**, **{SIDE_BY_SIDE_BENCH_SCOPE} only** (much higher because the GPU processes 64 frames per launch).
+On-video and JSON both show **bench FPS** — CUDA-timed throughput at **batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}**, **{SIDE_BY_SIDE_BENCH_SCOPE} only** (after warmup).
 
 {_device_label()} · Model: `{MODEL_WEIGHT}` · Max {MAX_DEMO_FRAMES} frames per clip
 
