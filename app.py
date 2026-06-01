@@ -28,6 +28,8 @@ from config       import (
     SIDE_BY_SIDE_BENCH_SCOPE,
     COMPILE_BENCHMARK_DISCARD_RUNS,
     COMPILE_BENCHMARK_REPEATS,
+    OVERLAY_UNTIMED_WARMUP_FRAMES,
+    COMPILE_OVERLAY_UNTIMED_WARMUP,
 )
 from model_loader import load_model, OPTIMIZATION_MODES, DEFAULT_COMPARE_MODE
 from inference    import (
@@ -56,6 +58,12 @@ def _get_model(mode: str, weight: str):
         )
         _model_cache[key] = load_model(mode, weight=weight)
     return _model_cache[key]
+
+
+def _overlay_untimed_warmup_frames(mode: str) -> int:
+    if OPTIMIZATION_MODES.get(mode, {}).get("compile_mode") and DEVICE.type == "cuda":
+        return max(OVERLAY_UNTIMED_WARMUP_FRAMES, COMPILE_OVERLAY_UNTIMED_WARMUP)
+    return OVERLAY_UNTIMED_WARMUP_FRAMES
 
 
 def _warmup_frames_for_mode(mode: str) -> int:
@@ -237,32 +245,27 @@ def side_by_side_videos(
     progress(0.38, desc=f"Benchmarking {mode_right} ...")
     metrics_right = _collect_benchmark_metrics(bundle_right, mode_right, tensors)
 
-    # Overlay uses per-frame forward+NMS; warm up at batch 1 (separate from batched JSON bench).
-    scope_overlay = "forward+nms"
-    warmup_model(
-        bundle_eager,
-        tensors,
-        warmup_frames=_warmup_frames_for_mode("eager"),
-        batch_size=1,
-        timing_scope=scope_overlay,
-    )
-    warmup_model(
-        bundle_right,
-        tensors,
-        warmup_frames=_warmup_frames_for_mode(mode_right),
-        batch_size=1,
-        timing_scope=scope_overlay,
-    )
-
     progress(0.42, desc="Running Eager video inference ...")
     eager_frames = run_video_inference_with_fps_overlay(
-        bundle_eager, raw_frames, tensors, shapes, ratios, pads
+        bundle_eager,
+        raw_frames,
+        tensors,
+        shapes,
+        ratios,
+        pads,
+        untimed_warmup_frames=_overlay_untimed_warmup_frames("eager"),
     )
 
     mode_name = OPTIMIZATION_MODES.get(mode_right, {}).get("overlay_label", mode_right)
     progress(0.65, desc=f"Running {mode_name} video inference ...")
     right_frames = run_video_inference_with_fps_overlay(
-        bundle_right, raw_frames, tensors, shapes, ratios, pads
+        bundle_right,
+        raw_frames,
+        tensors,
+        shapes,
+        ratios,
+        pads,
+        untimed_warmup_frames=_overlay_untimed_warmup_frames(mode_right),
     )
 
     progress(0.90, desc="Saving output videos ...")
@@ -333,7 +336,7 @@ with gr.Blocks(
 
 Compare **YOLOv8n** side by side: **Eager** (left) vs an optimized mode (right).
 
-**On-video FPS** updates each frame (per-frame forward + NMS). **JSON below** is batched throughput at **batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}**, **{SIDE_BY_SIDE_BENCH_SCOPE}** — use that to compare acceleration.
+**On-video FPS** — live EMA of **forward + NMS only** (boxes drawn after timing; compile warmup frames untimed). **JSON** — batched throughput (batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}, {SIDE_BY_SIDE_BENCH_SCOPE}) for peak acceleration numbers.
 
 {_device_label()} · Model: `{MODEL_WEIGHT}` · Max {MAX_DEMO_FRAMES} frames per clip
 

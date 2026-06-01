@@ -186,7 +186,14 @@ import torch
 from ultralytics.utils import nms, ops
 from ultralytics.utils.plotting import Annotator, colors as yolo_colors
 
-from config import DEVICE, IMG_SIZE, CONF_THRESHOLD, IOU_THRESHOLD, MAX_DEMO_FRAMES
+from config import (
+    DEVICE,
+    IMG_SIZE,
+    CONF_THRESHOLD,
+    IOU_THRESHOLD,
+    MAX_DEMO_FRAMES,
+    OVERLAY_FPS_DISPLAY_SKIP,
+)
 from model_loader import ModelBundle
 
 
@@ -377,6 +384,15 @@ def _overlay_text_bottom_left(frame_bgr: np.ndarray, lines: str | list[str]) -> 
     return out
 
 
+def _forward_nms(bundle: ModelBundle, tensor: torch.Tensor) -> torch.Tensor:
+    pred = _forward(bundle, tensor)
+    return nms.non_max_suppression(
+        pred,
+        conf_thres=CONF_THRESHOLD,
+        iou_thres=IOU_THRESHOLD,
+    )[0]
+
+
 @torch.inference_mode()
 def run_video_inference_with_fps_overlay(
     bundle: ModelBundle,
@@ -385,31 +401,43 @@ def run_video_inference_with_fps_overlay(
     shapes: list,
     ratios: list,
     pads: list,
+    *,
+    untimed_warmup_frames: int = 0,
 ) -> list[np.ndarray]:
-    """Annotated pass; overlay shows per-frame FPS (EMA of forward + NMS)."""
+    """
+    Annotated pass with live FPS overlay.
+
+    - Untimed warmup frames: compile / CUDA setup (not shown, not timed).
+    - Timed region: forward + NMS only (annotation drawn after the timer).
+    - EMA FPS shown after a short settle period so early spikes are excluded.
+    """
     annotated: list[np.ndarray] = []
     ema_fps: float | None = None
+    timed_count = 0
+    n_untimed = min(int(untimed_warmup_frames), len(tensors))
 
-    for frame, t, orig_shape in zip(raw_frames, tensors, shapes):
-        if DEVICE.type == "cuda":
-            torch.cuda.synchronize()
-        t0 = time.perf_counter()
+    for i, (frame, t, orig_shape) in enumerate(zip(raw_frames, tensors, shapes)):
+        measure = i >= n_untimed
 
-        pred = _forward(bundle, t)
-        det = nms.non_max_suppression(
-            pred,
-            conf_thres=CONF_THRESHOLD,
-            iou_thres=IOU_THRESHOLD,
-        )[0]
+        if measure:
+            if DEVICE.type == "cuda":
+                torch.cuda.synchronize()
+            t0 = time.perf_counter()
 
-        if DEVICE.type == "cuda":
-            torch.cuda.synchronize()
-        dt = max(time.perf_counter() - t0, 1e-9)
-        fps_inst = 1.0 / dt
-        ema_fps = fps_inst if ema_fps is None else (0.85 * ema_fps + 0.15 * fps_inst)
+        det = _forward_nms(bundle, t)
+
+        if measure:
+            if DEVICE.type == "cuda":
+                torch.cuda.synchronize()
+            dt = max(time.perf_counter() - t0, 1e-9)
+            fps_inst = 1.0 / dt
+            ema_fps = fps_inst if ema_fps is None else (0.8 * ema_fps + 0.2 * fps_inst)
+            timed_count += 1
 
         ann = annotate_frame(frame, det, bundle.names, orig_shape)
-        annotated.append(_overlay_text_bottom_left(ann, f"FPS: {ema_fps:.1f}"))
+        if measure and ema_fps is not None and timed_count > OVERLAY_FPS_DISPLAY_SKIP:
+            ann = _overlay_text_bottom_left(ann, f"FPS: {ema_fps:.1f}")
+        annotated.append(ann)
 
     return annotated
 
