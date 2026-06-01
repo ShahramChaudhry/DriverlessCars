@@ -406,9 +406,10 @@ def run_video_inference_with_fps_overlay(
     annotated: list[np.ndarray] = []
     ema_fps: float | None = None
     timed_batches = 0
-    n_untimed = min(int(untimed_warmup_frames), len(tensors))
     bs = min(int(batch_size or OVERLAY_FPS_BATCH_SIZE), len(tensors))
     bs = max(1, bs)
+    # Leave at least one timed batch (100 frames / batch 64 => only 2 batches total).
+    n_untimed = min(int(untimed_warmup_frames), max(0, len(tensors) - bs))
 
     i = 0
     while i < len(tensors):
@@ -447,8 +448,7 @@ def run_video_inference_with_fps_overlay(
         )
 
         show_fps = (
-            measure
-            and ema_fps is not None
+            ema_fps is not None
             and timed_batches > OVERLAY_FPS_BATCH_SKIP
         )
         hud = f"FPS: {ema_fps:.0f}" if show_fps else None
