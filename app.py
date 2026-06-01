@@ -242,7 +242,7 @@ with gr.Blocks(
         out_right = gr.Video(label="Right-side output", autoplay=True, loop=True)
 
     # Auto-run after upload; also rerun when mode/model changes (if upload exists).
-    upload.change(
+    upload.upload(
         fn=side_by_side_videos,
         inputs=[upload, model_weight, right_mode],
         outputs=[out_left, out_right],
