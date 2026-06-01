@@ -15,5 +15,9 @@ COMPILE_WARMUP_FRAMES = 50   # torch.compile autotune needs more untimed frames 
 BENCHMARK_REPEATS     = 5    # first run discarded → stats from 4 runs
 MAX_DEMO_FRAMES       = 100  # cap keeps VRAM usage ~470 MB and latency manageable
 
+# Side-by-side panel benchmarks (CUDA-event timing, mirrors run_demo)
+SIDE_BY_SIDE_BENCH_BATCH_SIZE = 64
+SIDE_BY_SIDE_BENCH_SCOPE      = "forward"  # use "forward+nms" to include NMS in timed path
+
 # Pruning (structured / unstructured modes) — stronger default so effects show up in benchmarks
 PRUNE_RATIO = 0.50

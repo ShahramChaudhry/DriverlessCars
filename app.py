@@ -24,6 +24,8 @@ from config       import (
     BENCHMARK_REPEATS,
     MAX_DEMO_FRAMES,
     CONF_THRESHOLD,
+    SIDE_BY_SIDE_BENCH_BATCH_SIZE,
+    SIDE_BY_SIDE_BENCH_SCOPE,
 )
 from model_loader import load_model, OPTIMIZATION_MODES, DEFAULT_COMPARE_MODE
 from inference    import (
@@ -59,6 +61,41 @@ def _warmup_frames_for_mode(mode: str) -> int:
     if OPTIMIZATION_MODES.get(mode, {}).get("compile_mode") and DEVICE.type == "cuda":
         return max(WARMUP_FRAMES, COMPILE_WARMUP_FRAMES)
     return WARMUP_FRAMES
+
+
+def _collect_benchmark_metrics(
+    bundle,
+    mode_key: str,
+    tensors: list,
+) -> dict:
+    """CUDA-event benchmark after warmup; first timed run discarded."""
+    batch_size = min(SIDE_BY_SIDE_BENCH_BATCH_SIZE, len(tensors))
+    metrics = benchmark_video(
+        bundle,
+        tensors,
+        repeats=BENCHMARK_REPEATS,
+        batch_size=batch_size,
+        timing_scope=SIDE_BY_SIDE_BENCH_SCOPE,
+    )
+    n_warm = _warmup_frames_for_mode(mode_key)
+    metrics.update(
+        {
+            "mode": mode_key,
+            "label": OPTIMIZATION_MODES.get(mode_key, {}).get("label", mode_key),
+            "model_weight": MODEL_WEIGHT,
+            "warmup_frames": n_warm,
+            "benchmark_note": (
+                f"Timing scope: {SIDE_BY_SIDE_BENCH_SCOPE}. "
+                "Preprocessing excluded (pre-loaded to GPU). "
+                f"Warmup: {n_warm} frames. "
+                "First timed run discarded (mirrors ResNet benchmark)."
+            ),
+            "fps": round(metrics["fps"], 2),
+            "mean_seconds": round(metrics["mean_seconds"], 6),
+            "median_seconds": round(metrics["median_seconds"], 6),
+        }
+    )
+    return metrics
 
 
 # ── Core demo function ────────────────────────────────────────────────────────
@@ -139,20 +176,20 @@ def side_by_side_videos(
     video_path: str | None,
     mode_right: str,
     progress=gr.Progress(),
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, dict | None, dict | None]:
     """
     Produce two output videos side-by-side (looping in UI):
       - Left: eager
       - Right: user-selected mode (default: amp_compile)
-    Each output has a per-frame (EMA) FPS overlay.
+    Each output has a per-frame (EMA) FPS overlay plus benchmark JSON below.
     """
     if video_path is None:
-        return None, None
+        return None, None, None, None
 
     progress(0.05, desc="Loading & preprocessing frames ...")
     raw_frames, tensors, shapes, ratios, pads, fps, _ = load_video_frames(video_path)
     if not tensors:
-        return None, None
+        return None, None, None, None
 
     progress(0.15, desc="Loading models (cached) ...")
     bundle_eager = _get_model("eager", MODEL_WEIGHT)
@@ -165,7 +202,13 @@ def side_by_side_videos(
     progress(0.28, desc=f"Warming up {mode_right} ({n_warm} frames, not in FPS) ...")
     warmup_model(bundle_right, tensors, warmup_frames=n_warm)
 
-    progress(0.35, desc="Running Eager video inference ...")
+    progress(0.32, desc="Benchmarking Eager ...")
+    metrics_eager = _collect_benchmark_metrics(bundle_eager, "eager", tensors)
+
+    progress(0.38, desc=f"Benchmarking {mode_right} ...")
+    metrics_right = _collect_benchmark_metrics(bundle_right, mode_right, tensors)
+
+    progress(0.42, desc="Running Eager video inference ...")
     eager_frames = run_video_inference_with_fps_overlay(
         bundle_eager,
         raw_frames,
@@ -197,7 +240,7 @@ def side_by_side_videos(
     save_video(right_frames, out_b, fps)
 
     progress(1.0, desc="Done!")
-    return out_a, out_b
+    return out_a, out_b, metrics_eager, metrics_right
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
 def _device_label() -> str:
@@ -252,8 +295,9 @@ with gr.Blocks(
 # Driverless Cars — real-time perception demo
 
 Compare **YOLOv8n** object detection side by side: a fixed **eager FP32 baseline** (left) vs an
-**optimized mode** you choose (right). Each video shows **inference FPS** (forward + NMS, after
-warmup) so compile/AMP speedups are visible; drawing boxes is not timed.
+**optimized mode** you choose (right). Each video shows **inference FPS** on the frame (forward + NMS, after warmup). Below each
+panel, **benchmark JSON** reports CUDA-timed throughput (`batch_size={SIDE_BY_SIDE_BENCH_BATCH_SIZE}`,
+scope `{SIDE_BY_SIDE_BENCH_SCOPE}`) after warmup — first timed run discarded.
 
 {_device_label()} · Model: `{MODEL_WEIGHT}` · Max {MAX_DEMO_FRAMES} frames per clip
 
@@ -282,12 +326,14 @@ Upload a driving clip, pick a mode on the right, and both panels re-run automati
         with gr.Column():
             gr.Markdown("**Left — Eager (baseline)**", elem_classes=["demo-panel-title"])
             out_left = gr.Video(autoplay=True, loop=True, show_label=False)
+            bench_left = gr.JSON(label="Benchmark metrics")
         with gr.Column():
             gr.Markdown("**Right — optimized mode**", elem_classes=["demo-panel-title"])
             out_right = gr.Video(autoplay=True, loop=True, show_label=False)
+            bench_right = gr.JSON(label="Benchmark metrics")
 
     _demo_inputs = [upload, right_mode]
-    _demo_outputs = [out_left, out_right]
+    _demo_outputs = [out_left, out_right, bench_left, bench_right]
 
     upload.upload(fn=side_by_side_videos, inputs=_demo_inputs, outputs=_demo_outputs)
     right_mode.change(fn=side_by_side_videos, inputs=_demo_inputs, outputs=_demo_outputs)
