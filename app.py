@@ -16,7 +16,15 @@ import tempfile
 import gradio as gr
 import torch
 
-from config       import DEVICE, MODEL_WEIGHT, WARMUP_FRAMES, BENCHMARK_REPEATS, MAX_DEMO_FRAMES, CONF_THRESHOLD
+from config       import (
+    DEVICE,
+    MODEL_WEIGHT,
+    WARMUP_FRAMES,
+    COMPILE_WARMUP_FRAMES,
+    BENCHMARK_REPEATS,
+    MAX_DEMO_FRAMES,
+    CONF_THRESHOLD,
+)
 from model_loader import load_model, OPTIMIZATION_MODES, DEFAULT_COMPARE_MODE
 from inference    import (
     load_video_frames,
@@ -44,6 +52,13 @@ def _get_model(mode: str, weight: str):
         )
         _model_cache[key] = load_model(mode, weight=weight)
     return _model_cache[key]
+
+
+def _warmup_frames_for_mode(mode: str) -> int:
+    """Compiled modes need extra untimed frames before FPS overlay reflects steady state."""
+    if OPTIMIZATION_MODES.get(mode, {}).get("compile_mode") and DEVICE.type == "cuda":
+        return max(WARMUP_FRAMES, COMPILE_WARMUP_FRAMES)
+    return WARMUP_FRAMES
 
 
 # ── Core demo function ────────────────────────────────────────────────────────
@@ -143,7 +158,14 @@ def side_by_side_videos(
     bundle_eager = _get_model("eager", MODEL_WEIGHT)
     bundle_right = _get_model(mode_right, MODEL_WEIGHT)
 
-    progress(0.30, desc="Running Eager video inference ...")
+    progress(0.22, desc=f"Warming up Eager ({_warmup_frames_for_mode('eager')} frames, not in FPS) ...")
+    warmup_model(bundle_eager, tensors, warmup_frames=_warmup_frames_for_mode("eager"))
+
+    n_warm = _warmup_frames_for_mode(mode_right)
+    progress(0.28, desc=f"Warming up {mode_right} ({n_warm} frames, not in FPS) ...")
+    warmup_model(bundle_right, tensors, warmup_frames=n_warm)
+
+    progress(0.35, desc="Running Eager video inference ...")
     eager_frames = run_video_inference_with_fps_overlay(
         bundle_eager,
         raw_frames,
@@ -230,8 +252,8 @@ with gr.Blocks(
 # Driverless Cars — real-time perception demo
 
 Compare **YOLOv8n** object detection side by side: a fixed **eager FP32 baseline** (left) vs an
-**optimized mode** you choose (right). Each video shows live **FPS** on the frame so you can see
-throughput differences while boxes are drawn on cars, pedestrians, and other COCO classes.
+**optimized mode** you choose (right). Each video shows **inference FPS** (forward + NMS, after
+warmup) so compile/AMP speedups are visible; drawing boxes is not timed.
 
 {_device_label()} · Model: `{MODEL_WEIGHT}` · Max {MAX_DEMO_FRAMES} frames per clip
 

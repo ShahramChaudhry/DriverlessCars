@@ -10,9 +10,10 @@ IOU_THRESHOLD  = 0.45
 # Mirrors ResNet benchmark philosophy exactly:
 #   warmup passes are run but never timed
 #   first timed run is discarded before computing stats
-WARMUP_FRAMES     = 10
-BENCHMARK_REPEATS = 5    # first run discarded → stats from 4 runs
-MAX_DEMO_FRAMES   = 100  # cap keeps VRAM usage ~470 MB and latency manageable
+WARMUP_FRAMES         = 10
+COMPILE_WARMUP_FRAMES = 50   # torch.compile autotune needs more untimed frames in the demo
+BENCHMARK_REPEATS     = 5    # first run discarded → stats from 4 runs
+MAX_DEMO_FRAMES       = 100  # cap keeps VRAM usage ~470 MB and latency manageable
 
 # Pruning (structured / unstructured modes) — stronger default so effects show up in benchmarks
 PRUNE_RATIO = 0.50

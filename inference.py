@@ -383,8 +383,11 @@ def run_video_inference_with_fps_overlay(
     overlay_label: str,
 ) -> list[np.ndarray]:
     """
-    Full annotated pass with an (EMA) FPS overlay per frame.
-    FPS is measured for forward+NMS+annotation. On CUDA we synchronize for accuracy.
+    Annotated pass with per-frame FPS overlay (EMA).
+
+    FPS counts GPU forward + NMS only (annotation is drawn after the timer stops)
+    so AMP / torch.compile speedups are visible. Call warmup_model() before this
+    so compile and CUDA kernel setup are not included in the overlay numbers.
     """
     annotated: list[np.ndarray] = []
     ema_fps: float | None = None
@@ -400,14 +403,14 @@ def run_video_inference_with_fps_overlay(
             conf_thres=CONF_THRESHOLD,
             iou_thres=IOU_THRESHOLD,
         )[0]
-        ann = annotate_frame(frame, det, bundle.names, orig_shape)
 
         if DEVICE.type == "cuda":
             torch.cuda.synchronize()
         dt = max(time.perf_counter() - t0, 1e-9)
         fps_inst = 1.0 / dt
-        ema_fps = fps_inst if ema_fps is None else (0.9 * ema_fps + 0.1 * fps_inst)
+        ema_fps = fps_inst if ema_fps is None else (0.85 * ema_fps + 0.15 * fps_inst)
 
+        ann = annotate_frame(frame, det, bundle.names, orig_shape)
         ann = _overlay_text_bottom_left(ann, f"{overlay_label} | FPS: {ema_fps:.1f}")
         annotated.append(ann)
 
