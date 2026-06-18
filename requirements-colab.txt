@@ -1,0 +1,6 @@
+# Colab already ships CUDA PyTorch — do NOT pip install torch/torchvision (breaks GPU).
+ultralytics>=8.0.0
+torch-pruning>=1.3.0
+gradio>=4.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0

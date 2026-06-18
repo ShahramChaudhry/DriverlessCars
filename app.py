@@ -121,6 +121,8 @@ def _collect_benchmark_metrics(
             "mode": mode_key,
             "label": OPTIMIZATION_MODES.get(mode_key, {}).get("label", mode_key),
             "model_weight": MODEL_WEIGHT,
+            "device": str(DEVICE),
+            "cuda_available": torch.cuda.is_available(),
             "warmup_frames": n_warm,
             "benchmark_note": (
                 f"Timing scope: {SIDE_BY_SIDE_BENCH_SCOPE}, batch_size={batch_size}. "
@@ -281,7 +283,10 @@ def side_by_side_videos(
 def _device_label() -> str:
     if DEVICE.type == "cuda":
         return f"**Device:** {torch.cuda.get_device_name(0)} (CUDA)"
-    return "**Device:** CPU — compile and AMP modes may fall back to eager"
+    return (
+        "**Device:** CPU only — benchmarks will be ~2–3 FPS and AMP/compile will not help. "
+        "On Colab: Runtime → GPU, then reinstall with `requirements-colab.txt` (do not pip install torch)."
+    )
 
 
 def _right_panel_title(mode_key: str) -> str:

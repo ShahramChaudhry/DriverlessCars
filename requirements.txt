@@ -1,4 +1,5 @@
-# Core ML
+# Core ML (local / venv). On Google Colab use requirements-colab.txt instead — pip
+# installing torch here replaces Colab's CUDA build with CPU-only (~2 FPS benchmarks).
 torch>=2.1.0
 torchvision>=0.16.0
 ultralytics>=8.0.0
