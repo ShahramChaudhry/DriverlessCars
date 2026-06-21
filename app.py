@@ -69,17 +69,6 @@ def _warmup_frames_for_mode(mode: str) -> int:
     return WARMUP_FRAMES
 
 
-def _overlay_metrics(mode_key: str, metrics: dict) -> dict:
-    """Attach UI labels to inference-pass metrics for the JSON panel."""
-    return {
-        **metrics,
-        "label": OPTIMIZATION_MODES.get(mode_key, {}).get("label", mode_key),
-        "model_weight": MODEL_WEIGHT,
-        "cuda_available": torch.cuda.is_available(),
-        "warmup_frames": _warmup_frames_for_mode(mode_key),
-    }
-
-
 def _warmup_for_overlay(bundle, mode_key: str, tensors: list) -> None:
     """Light untimed warmup before the annotated pass (single-frame, forward only)."""
     warmup_model(
@@ -169,20 +158,20 @@ def side_by_side_videos(
     video_path: str | None,
     mode_right: str,
     progress=gr.Progress(),
-) -> tuple[str | None, str | None, dict | None, dict | None, str]:
+) -> tuple[str | None, str | None, str]:
     """
     Produce two output videos side-by-side (looping in UI):
       - Left: eager
       - Right: user-selected mode (default: amp_compile)
-    Each output has a per-frame (EMA) FPS overlay plus metrics JSON from the same pass.
+    Each output has a per-frame (EMA) FPS overlay.
     """
     if video_path is None:
-        return None, None, None, None, _right_panel_title(mode_right)
+        return None, None, _right_panel_title(mode_right)
 
     progress(0.05, desc="Loading & preprocessing frames ...")
     raw_frames, tensors, shapes, ratios, pads, fps, _ = load_video_frames(video_path)
     if not tensors:
-        return None, None, None, None, _right_panel_title(mode_right)
+        return None, None, _right_panel_title(mode_right)
 
     progress(0.15, desc="Loading models (cached) ...")
     bundle_eager = _get_model("eager", MODEL_WEIGHT)
@@ -195,7 +184,7 @@ def side_by_side_videos(
     _warmup_for_overlay(bundle_right, mode_right, tensors)
 
     progress(0.35, desc="Running Eager video inference ...")
-    eager_frames, metrics_eager = run_video_inference_with_fps_overlay(
+    eager_frames = run_video_inference_with_fps_overlay(
         bundle_eager,
         raw_frames,
         tensors,
@@ -207,7 +196,7 @@ def side_by_side_videos(
 
     mode_name = OPTIMIZATION_MODES.get(mode_right, {}).get("overlay_label", mode_right)
     progress(0.65, desc=f"Running {mode_name} video inference ...")
-    right_frames, metrics_right = run_video_inference_with_fps_overlay(
+    right_frames = run_video_inference_with_fps_overlay(
         bundle_right,
         raw_frames,
         tensors,
@@ -224,13 +213,7 @@ def side_by_side_videos(
     save_video(right_frames, out_b, fps)
 
     progress(1.0, desc="Done!")
-    return (
-        out_a,
-        out_b,
-        _overlay_metrics("eager", metrics_eager),
-        _overlay_metrics(mode_right, metrics_right),
-        _right_panel_title(mode_right),
-    )
+    return out_a, out_b, _right_panel_title(mode_right)
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
 def _device_label() -> str:
@@ -294,7 +277,7 @@ with gr.Blocks(
 
 Compare **YOLOv8n** side by side: **Eager** (left) vs an optimized mode (right).
 
-**On-video FPS** and the **JSON panel** both come from the same annotated pass (per-frame forward, smoothed EMA).
+**On-video FPS** is per-frame forward throughput (smoothed EMA) on each output video.
 
 {_device_label()} · Model: `{MODEL_WEIGHT}` · Max {MAX_DEMO_FRAMES} frames per clip
 
@@ -323,17 +306,15 @@ Upload a driving clip, pick a mode on the right, and both panels re-run automati
         with gr.Column():
             gr.Markdown("**Left — Eager (baseline)**", elem_classes=["demo-panel-title"])
             out_left = gr.Video(autoplay=True, loop=True, show_label=False)
-            bench_left = gr.JSON(label="Benchmark metrics")
         with gr.Column():
             right_title = gr.Markdown(
                 _right_panel_title(DEFAULT_COMPARE_MODE),
                 elem_classes=["demo-panel-title"],
             )
             out_right = gr.Video(autoplay=True, loop=True, show_label=False)
-            bench_right = gr.JSON(label="Benchmark metrics")
 
     _demo_inputs = [upload, right_mode]
-    _demo_outputs = [out_left, out_right, bench_left, bench_right, right_title]
+    _demo_outputs = [out_left, out_right, right_title]
 
     upload.upload(fn=side_by_side_videos, inputs=_demo_inputs, outputs=_demo_outputs)
     right_mode.change(fn=side_by_side_videos, inputs=_demo_inputs, outputs=_demo_outputs)

@@ -177,7 +177,6 @@ strategy as building gpu_batches in the ResNet50 benchmark.
 """
 from __future__ import annotations
 
-import statistics
 import time
 
 import cv2
@@ -395,18 +394,16 @@ def run_video_inference_with_fps_overlay(
     pads: list,
     *,
     untimed_warmup_frames: int = 0,
-) -> tuple[list[np.ndarray], dict]:
+) -> list[np.ndarray]:
     """
     Live FPS overlay — updates every frame (EMA).
 
     Times forward pass only per frame; NMS + annotation are after the timer.
-    Returns annotated frames plus metrics derived from the same pass (no extra benchmark run).
     """
     annotated: list[np.ndarray] = []
     ema_fps: float | None = None
     n_untimed = min(int(untimed_warmup_frames), max(0, len(tensors) - 1))
     timed_frames = 0
-    frame_seconds: list[float] = []
 
     for i, (frame, t, orig_shape) in enumerate(zip(raw_frames, tensors, shapes)):
         measure = i >= n_untimed
@@ -419,7 +416,6 @@ def run_video_inference_with_fps_overlay(
             if DEVICE.type == "cuda":
                 torch.cuda.synchronize()
             dt = max(time.perf_counter() - t0, 1e-9)
-            frame_seconds.append(dt)
             fps_inst = 1.0 / dt
             ema_fps = fps_inst if ema_fps is None else (0.8 * ema_fps + 0.2 * fps_inst)
             timed_frames += 1
@@ -437,26 +433,7 @@ def run_video_inference_with_fps_overlay(
             ann = _overlay_text_bottom_left(ann, f"FPS: {ema_fps:.1f}")
         annotated.append(ann)
 
-    ms_runs = [s * 1000.0 for s in frame_seconds]
-    metrics: dict = {
-        "mode": bundle.mode,
-        "device": str(DEVICE),
-        "num_frames": len(tensors),
-        "timed_frames": timed_frames,
-        "timing_scope": "forward",
-        "fps": round(ema_fps or 0.0, 2),
-        "benchmark_note": (
-            "Per-frame forward FPS from the annotated video pass (EMA). "
-            "No separate batched benchmark — matches on-video overlay."
-        ),
-    }
-    if ms_runs:
-        metrics["mean_ms_per_frame"] = round(statistics.mean(ms_runs), 3)
-        metrics["median_ms_per_frame"] = round(statistics.median(ms_runs), 3)
-        if len(ms_runs) > 1:
-            metrics["std_ms_per_frame"] = round(statistics.stdev(ms_runs), 3)
-
-    return annotated, metrics
+    return annotated
 
 
 # ── Video output ──────────────────────────────────────────────────────────────
