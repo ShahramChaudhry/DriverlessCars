@@ -24,10 +24,6 @@ from config       import (
     BENCHMARK_REPEATS,
     MAX_DEMO_FRAMES,
     CONF_THRESHOLD,
-    SIDE_BY_SIDE_BENCH_BATCH_SIZE,
-    SIDE_BY_SIDE_BENCH_SCOPE,
-    COMPILE_BENCHMARK_DISCARD_RUNS,
-    COMPILE_BENCHMARK_REPEATS,
     OVERLAY_UNTIMED_WARMUP_FRAMES,
     COMPILE_OVERLAY_UNTIMED_WARMUP,
 )
@@ -38,7 +34,7 @@ from inference    import (
     run_video_inference_with_fps_overlay,
     save_video,
 )
-from benchmark    import warmup_model, warmup_full_video_passes, benchmark_video
+from benchmark    import warmup_model, benchmark_video
 
 
 def _mode_radio_choices() -> list[tuple[str, str]]:
@@ -73,69 +69,26 @@ def _warmup_frames_for_mode(mode: str) -> int:
     return WARMUP_FRAMES
 
 
-def _bench_batch_size(num_frames: int) -> int:
-    return min(SIDE_BY_SIDE_BENCH_BATCH_SIZE, num_frames)
+def _overlay_metrics(mode_key: str, metrics: dict) -> dict:
+    """Attach UI labels to inference-pass metrics for the JSON panel."""
+    return {
+        **metrics,
+        "label": OPTIMIZATION_MODES.get(mode_key, {}).get("label", mode_key),
+        "model_weight": MODEL_WEIGHT,
+        "cuda_available": torch.cuda.is_available(),
+        "warmup_frames": _warmup_frames_for_mode(mode_key),
+    }
 
 
-def _benchmark_discard_runs(mode_key: str) -> int:
-    if OPTIMIZATION_MODES.get(mode_key, {}).get("compile_mode"):
-        return COMPILE_BENCHMARK_DISCARD_RUNS
-    return 1
-
-
-def _benchmark_repeats(mode_key: str) -> int:
-    if OPTIMIZATION_MODES.get(mode_key, {}).get("compile_mode"):
-        return max(BENCHMARK_REPEATS, COMPILE_BENCHMARK_REPEATS)
-    return BENCHMARK_REPEATS
-
-
-def _warmup_for_benchmark(bundle, mode_key: str, tensors: list) -> None:
-    """Warm up at the same batch size / scope as the JSON benchmark."""
-    bs = _bench_batch_size(len(tensors))
-    scope = SIDE_BY_SIDE_BENCH_SCOPE
-    n = _warmup_frames_for_mode(mode_key)
-    warmup_model(bundle, tensors, warmup_frames=n, batch_size=bs, timing_scope=scope)
-    if OPTIMIZATION_MODES.get(mode_key, {}).get("compile_mode"):
-        warmup_full_video_passes(bundle, tensors, passes=3, batch_size=bs, timing_scope=scope)
-
-
-def _collect_benchmark_metrics(
-    bundle,
-    mode_key: str,
-    tensors: list,
-) -> dict:
-    """CUDA-event benchmark after warmup; compile modes discard extra cold timed runs."""
-    batch_size = _bench_batch_size(len(tensors))
-    discard = _benchmark_discard_runs(mode_key)
-    metrics = benchmark_video(
+def _warmup_for_overlay(bundle, mode_key: str, tensors: list) -> None:
+    """Light untimed warmup before the annotated pass (single-frame, forward only)."""
+    warmup_model(
         bundle,
         tensors,
-        repeats=_benchmark_repeats(mode_key),
-        batch_size=batch_size,
-        timing_scope=SIDE_BY_SIDE_BENCH_SCOPE,
-        discard_runs=discard,
+        warmup_frames=_warmup_frames_for_mode(mode_key),
+        batch_size=1,
+        timing_scope="forward",
     )
-    n_warm = _warmup_frames_for_mode(mode_key)
-    metrics.update(
-        {
-            "mode": mode_key,
-            "label": OPTIMIZATION_MODES.get(mode_key, {}).get("label", mode_key),
-            "model_weight": MODEL_WEIGHT,
-            "device": str(DEVICE),
-            "cuda_available": torch.cuda.is_available(),
-            "warmup_frames": n_warm,
-            "benchmark_note": (
-                f"Timing scope: {SIDE_BY_SIDE_BENCH_SCOPE}, batch_size={batch_size}. "
-                "Preprocessing excluded (pre-loaded to GPU). "
-                f"Warmup at benchmark batch size (+ full-video passes for compile). "
-                f"First {discard} timed run(s) discarded. "
-                "fps uses median of remaining runs (steady state)."
-            ),
-            "mean_seconds": round(metrics["mean_seconds"], 6),
-            "median_seconds": round(metrics["median_seconds"], 6),
-        }
-    )
-    return metrics
 
 
 # ── Core demo function ────────────────────────────────────────────────────────
@@ -221,7 +174,7 @@ def side_by_side_videos(
     Produce two output videos side-by-side (looping in UI):
       - Left: eager
       - Right: user-selected mode (default: amp_compile)
-    Each output has a per-frame (EMA) FPS overlay plus benchmark JSON below.
+    Each output has a per-frame (EMA) FPS overlay plus metrics JSON from the same pass.
     """
     if video_path is None:
         return None, None, None, None, _right_panel_title(mode_right)
@@ -235,20 +188,14 @@ def side_by_side_videos(
     bundle_eager = _get_model("eager", MODEL_WEIGHT)
     bundle_right = _get_model(mode_right, MODEL_WEIGHT)
 
-    progress(0.22, desc="Warming up Eager (benchmark batch size) ...")
-    _warmup_for_benchmark(bundle_eager, "eager", tensors)
+    progress(0.22, desc="Warming up Eager ...")
+    _warmup_for_overlay(bundle_eager, "eager", tensors)
 
-    progress(0.28, desc=f"Warming up {mode_right} (benchmark batch size) ...")
-    _warmup_for_benchmark(bundle_right, mode_right, tensors)
+    progress(0.28, desc=f"Warming up {mode_right} ...")
+    _warmup_for_overlay(bundle_right, mode_right, tensors)
 
-    progress(0.32, desc="Benchmarking Eager ...")
-    metrics_eager = _collect_benchmark_metrics(bundle_eager, "eager", tensors)
-
-    progress(0.38, desc=f"Benchmarking {mode_right} ...")
-    metrics_right = _collect_benchmark_metrics(bundle_right, mode_right, tensors)
-
-    progress(0.42, desc="Running Eager video inference ...")
-    eager_frames = run_video_inference_with_fps_overlay(
+    progress(0.35, desc="Running Eager video inference ...")
+    eager_frames, metrics_eager = run_video_inference_with_fps_overlay(
         bundle_eager,
         raw_frames,
         tensors,
@@ -260,7 +207,7 @@ def side_by_side_videos(
 
     mode_name = OPTIMIZATION_MODES.get(mode_right, {}).get("overlay_label", mode_right)
     progress(0.65, desc=f"Running {mode_name} video inference ...")
-    right_frames = run_video_inference_with_fps_overlay(
+    right_frames, metrics_right = run_video_inference_with_fps_overlay(
         bundle_right,
         raw_frames,
         tensors,
@@ -277,7 +224,13 @@ def side_by_side_videos(
     save_video(right_frames, out_b, fps)
 
     progress(1.0, desc="Done!")
-    return out_a, out_b, metrics_eager, metrics_right, _right_panel_title(mode_right)
+    return (
+        out_a,
+        out_b,
+        _overlay_metrics("eager", metrics_eager),
+        _overlay_metrics(mode_right, metrics_right),
+        _right_panel_title(mode_right),
+    )
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
 def _device_label() -> str:
@@ -341,7 +294,7 @@ with gr.Blocks(
 
 Compare **YOLOv8n** side by side: **Eager** (left) vs an optimized mode (right).
 
-**On-video FPS** updates every frame (forward only, smoothed). **JSON** is peak batched throughput (batch {SIDE_BY_SIDE_BENCH_BATCH_SIZE}) — higher numbers, same trend (right faster than left).
+**On-video FPS** and the **JSON panel** both come from the same annotated pass (per-frame forward, smoothed EMA).
 
 {_device_label()} · Model: `{MODEL_WEIGHT}` · Max {MAX_DEMO_FRAMES} frames per clip
 
