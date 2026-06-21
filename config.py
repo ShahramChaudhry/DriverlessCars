@@ -13,13 +13,14 @@ IOU_THRESHOLD  = 0.45
 WARMUP_FRAMES         = 10
 COMPILE_WARMUP_FRAMES = 20   # extra untimed frames before compile modes reach steady overlay FPS
 BENCHMARK_REPEATS     = 5    # first run discarded → stats from 4 runs
-MAX_DEMO_FRAMES       = 100  # cap keeps VRAM usage ~470 MB and latency manageable
+MAX_DEMO_SECONDS     = 15   # load up to ~15s of source video (fps taken from file)
+MAX_DEMO_FRAMES      = 450  # hard cap (~15s @ 30fps); keeps VRAM reasonable on Colab
 
 # On-video FPS: batched forward throughput (matches fair benchmark methodology).
 OVERLAY_FPS_BATCH_SIZE         = 64
-OVERLAY_UNTIMED_WARMUP_FRAMES  = 10
-COMPILE_OVERLAY_UNTIMED_WARMUP = 64   # one untimed batch-64 pass before timing compile modes
-OVERLAY_FPS_DISPLAY_SKIP       = 0    # timed batches before showing EMA
+OVERLAY_UNTIMED_WARMUP_FRAMES  = 0     # warmup runs in app before overlay pass
+COMPILE_OVERLAY_UNTIMED_WARMUP = 0
+OVERLAY_FPS_DISPLAY_SKIP       = 0
 
 # Pruning (structured / unstructured modes) — stronger default so effects show up in benchmarks
 PRUNE_RATIO = 0.50

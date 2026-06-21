@@ -192,6 +192,7 @@ from config import (
     CONF_THRESHOLD,
     IOU_THRESHOLD,
     MAX_DEMO_FRAMES,
+    MAX_DEMO_SECONDS,
     OVERLAY_FPS_BATCH_SIZE,
     OVERLAY_FPS_DISPLAY_SKIP,
 )
@@ -245,20 +246,22 @@ def preprocess_frame(
 def load_video_frames(
     video_path: str,
     img_size: int = IMG_SIZE,
-    max_frames: int = MAX_DEMO_FRAMES,
+    max_frames: int | None = None,
+    max_seconds: float = MAX_DEMO_SECONDS,
 ) -> tuple[list, list, list, list, list, float, tuple[int, int]]:
     """
-    Read all frames, preprocess them, move tensors to DEVICE (CUDA when available, else CPU).
-    This is the video equivalent of building gpu_batches in the ResNet benchmark —
-    all preprocessing happens here so it is excluded from timing.
-
-    Returns:
-        raw_bgr_frames, gpu_tensors, orig_shapes, ratios, pads, fps, (w, h)
+    Read frames, preprocess them, move tensors to DEVICE (CUDA when available, else CPU).
+    Caps length by max_seconds (from file fps) and MAX_DEMO_FRAMES hard cap.
     """
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    if max_frames is None:
+        max_frames = min(int(max_seconds * fps), MAX_DEMO_FRAMES)
+    else:
+        max_frames = min(max_frames, MAX_DEMO_FRAMES)
 
     raw_frames, tensors, shapes, ratios, pads = [], [], [], [], []
 
@@ -436,9 +439,6 @@ def run_video_inference_with_fps_overlay(
             iou_thres=IOU_THRESHOLD,
         )
 
-        show_fps = measure and ema_fps is not None and timed_batches > OVERLAY_FPS_DISPLAY_SKIP
-        fps_label = f"FPS: {ema_fps:.1f}" if show_fps else None
-
         for j in range(actual_bs):
             idx = batch_start + j
             ann = annotate_frame(
@@ -447,9 +447,11 @@ def run_video_inference_with_fps_overlay(
                 bundle.names,
                 shapes[idx],
             )
-            if fps_label is not None:
-                ann = _overlay_text_bottom_left(ann, fps_label)
             annotated.append(ann)
+
+    if ema_fps is not None and timed_batches > OVERLAY_FPS_DISPLAY_SKIP:
+        label = f"FPS: {ema_fps:.1f}"
+        annotated = [_overlay_text_bottom_left(f, label) for f in annotated]
 
     return annotated
 

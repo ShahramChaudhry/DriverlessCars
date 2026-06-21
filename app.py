@@ -23,6 +23,7 @@ from config       import (
     COMPILE_WARMUP_FRAMES,
     BENCHMARK_REPEATS,
     MAX_DEMO_FRAMES,
+    MAX_DEMO_SECONDS,
     CONF_THRESHOLD,
     OVERLAY_UNTIMED_WARMUP_FRAMES,
     COMPILE_OVERLAY_UNTIMED_WARMUP,
@@ -291,7 +292,7 @@ Compare **YOLOv8n** side by side: **Eager** (left) vs an optimized mode (right).
 
 **On-video FPS** is batched forward throughput (batch {OVERLAY_FPS_BATCH_SIZE}, smoothed EMA) — same methodology as the CUDA benchmarks, not per-frame batch-1 latency.
 
-{_device_label()} · Model: `{MODEL_WEIGHT}` · Max {MAX_DEMO_FRAMES} frames per clip
+{_device_label()} · Model: `{MODEL_WEIGHT}` · Up to {MAX_DEMO_SECONDS:.0f}s per clip
 
 Upload a driving clip, pick a mode on the right, and both panels re-run automatically.
         """,
