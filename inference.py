@@ -192,6 +192,7 @@ from config import (
     CONF_THRESHOLD,
     IOU_THRESHOLD,
     MAX_DEMO_FRAMES,
+    OVERLAY_FPS_BATCH_SIZE,
     OVERLAY_FPS_DISPLAY_SKIP,
 )
 from model_loader import ModelBundle
@@ -394,44 +395,61 @@ def run_video_inference_with_fps_overlay(
     pads: list,
     *,
     untimed_warmup_frames: int = 0,
+    fps_batch_size: int = OVERLAY_FPS_BATCH_SIZE,
 ) -> list[np.ndarray]:
     """
-    Live FPS overlay — updates every frame (EMA).
+    FPS overlay from batched forward throughput (same methodology as CUDA benchmarks).
 
-    Times forward pass only per frame; NMS + annotation are after the timer.
+    torch.compile wins at batch size (e.g. 64), not batch=1 per-frame latency — timing
+    each forward batch keeps the on-video number aligned with benchmark results.
     """
     annotated: list[np.ndarray] = []
     ema_fps: float | None = None
     n_untimed = min(int(untimed_warmup_frames), max(0, len(tensors) - 1))
-    timed_frames = 0
+    timed_batches = 0
+    n = len(tensors)
+    fps_batch_size = max(1, min(int(fps_batch_size), n))
 
-    for i, (frame, t, orig_shape) in enumerate(zip(raw_frames, tensors, shapes)):
-        measure = i >= n_untimed
+    for batch_start in range(0, n, fps_batch_size):
+        batch_end = min(batch_start + fps_batch_size, n)
+        batch_tensors = torch.cat(tensors[batch_start:batch_end], dim=0)
+        actual_bs = batch_end - batch_start
+        measure = batch_start >= n_untimed
 
         if measure:
             if DEVICE.type == "cuda":
                 torch.cuda.synchronize()
             t0 = time.perf_counter()
-            pred = _forward(bundle, t)
+            pred = _forward(bundle, batch_tensors)
             if DEVICE.type == "cuda":
                 torch.cuda.synchronize()
             dt = max(time.perf_counter() - t0, 1e-9)
-            fps_inst = 1.0 / dt
-            ema_fps = fps_inst if ema_fps is None else (0.8 * ema_fps + 0.2 * fps_inst)
-            timed_frames += 1
+            batch_fps = actual_bs / dt
+            ema_fps = batch_fps if ema_fps is None else (0.8 * ema_fps + 0.2 * batch_fps)
+            timed_batches += 1
         else:
-            pred = _forward(bundle, t)
+            pred = _forward(bundle, batch_tensors)
 
-        det = nms.non_max_suppression(
+        det_list = nms.non_max_suppression(
             pred,
             conf_thres=CONF_THRESHOLD,
             iou_thres=IOU_THRESHOLD,
-        )[0]
+        )
 
-        ann = annotate_frame(frame, det, bundle.names, orig_shape)
-        if measure and ema_fps is not None and timed_frames > OVERLAY_FPS_DISPLAY_SKIP:
-            ann = _overlay_text_bottom_left(ann, f"FPS: {ema_fps:.1f}")
-        annotated.append(ann)
+        show_fps = measure and ema_fps is not None and timed_batches > OVERLAY_FPS_DISPLAY_SKIP
+        fps_label = f"FPS: {ema_fps:.1f}" if show_fps else None
+
+        for j in range(actual_bs):
+            idx = batch_start + j
+            ann = annotate_frame(
+                raw_frames[idx],
+                det_list[j],
+                bundle.names,
+                shapes[idx],
+            )
+            if fps_label is not None:
+                ann = _overlay_text_bottom_left(ann, fps_label)
+            annotated.append(ann)
 
     return annotated
 

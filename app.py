@@ -26,6 +26,7 @@ from config       import (
     CONF_THRESHOLD,
     OVERLAY_UNTIMED_WARMUP_FRAMES,
     COMPILE_OVERLAY_UNTIMED_WARMUP,
+    OVERLAY_FPS_BATCH_SIZE,
 )
 from model_loader import load_model, OPTIMIZATION_MODES, DEFAULT_COMPARE_MODE
 from inference    import (
@@ -34,7 +35,7 @@ from inference    import (
     run_video_inference_with_fps_overlay,
     save_video,
 )
-from benchmark    import warmup_model, benchmark_video
+from benchmark    import warmup_model, warmup_full_video_passes, benchmark_video
 
 
 def _mode_radio_choices() -> list[tuple[str, str]]:
@@ -70,14 +71,23 @@ def _warmup_frames_for_mode(mode: str) -> int:
 
 
 def _warmup_for_overlay(bundle, mode_key: str, tensors: list) -> None:
-    """Light untimed warmup before the annotated pass (single-frame, forward only)."""
+    """Untimed warmup at overlay batch size so compile graphs match timed batches."""
+    bs = min(OVERLAY_FPS_BATCH_SIZE, len(tensors))
     warmup_model(
         bundle,
         tensors,
         warmup_frames=_warmup_frames_for_mode(mode_key),
-        batch_size=1,
+        batch_size=bs,
         timing_scope="forward",
     )
+    if OPTIMIZATION_MODES.get(mode_key, {}).get("compile_mode") and DEVICE.type == "cuda":
+        warmup_full_video_passes(
+            bundle,
+            tensors,
+            passes=1,
+            batch_size=bs,
+            timing_scope="forward",
+        )
 
 
 # ── Core demo function ────────────────────────────────────────────────────────
@@ -192,6 +202,7 @@ def side_by_side_videos(
         ratios,
         pads,
         untimed_warmup_frames=_overlay_untimed_warmup_frames("eager"),
+        fps_batch_size=OVERLAY_FPS_BATCH_SIZE,
     )
 
     mode_name = OPTIMIZATION_MODES.get(mode_right, {}).get("overlay_label", mode_right)
@@ -204,6 +215,7 @@ def side_by_side_videos(
         ratios,
         pads,
         untimed_warmup_frames=_overlay_untimed_warmup_frames(mode_right),
+        fps_batch_size=OVERLAY_FPS_BATCH_SIZE,
     )
 
     progress(0.90, desc="Saving output videos ...")
@@ -277,7 +289,7 @@ with gr.Blocks(
 
 Compare **YOLOv8n** side by side: **Eager** (left) vs an optimized mode (right).
 
-**On-video FPS** is per-frame forward throughput (smoothed EMA) on each output video.
+**On-video FPS** is batched forward throughput (batch {OVERLAY_FPS_BATCH_SIZE}, smoothed EMA) — same methodology as the CUDA benchmarks, not per-frame batch-1 latency.
 
 {_device_label()} · Model: `{MODEL_WEIGHT}` · Max {MAX_DEMO_FRAMES} frames per clip
 

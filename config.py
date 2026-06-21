@@ -15,10 +15,11 @@ COMPILE_WARMUP_FRAMES = 20   # extra untimed frames before compile modes reach s
 BENCHMARK_REPEATS     = 5    # first run discarded → stats from 4 runs
 MAX_DEMO_FRAMES       = 100  # cap keeps VRAM usage ~470 MB and latency manageable
 
-# On-video: per-frame forward-only EMA (updates every frame). JSON uses the same pass.
+# On-video FPS: batched forward throughput (matches fair benchmark methodology).
+OVERLAY_FPS_BATCH_SIZE         = 64
 OVERLAY_UNTIMED_WARMUP_FRAMES  = 10
-COMPILE_OVERLAY_UNTIMED_WARMUP = 15
-OVERLAY_FPS_DISPLAY_SKIP       = 2    # timed frames before showing EMA
+COMPILE_OVERLAY_UNTIMED_WARMUP = 64   # one untimed batch-64 pass before timing compile modes
+OVERLAY_FPS_DISPLAY_SKIP       = 0    # timed batches before showing EMA
 
 # Pruning (structured / unstructured modes) — stronger default so effects show up in benchmarks
 PRUNE_RATIO = 0.50
