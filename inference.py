@@ -405,6 +405,7 @@ def run_video_inference_with_fps_overlay(
 
     torch.compile wins at batch size (e.g. 64), not batch=1 per-frame latency — timing
     each forward batch keeps the on-video number aligned with benchmark results.
+    FPS text updates each batch as the EMA changes (not a single value on every frame).
     """
     annotated: list[np.ndarray] = []
     ema_fps: float | None = None
@@ -439,6 +440,9 @@ def run_video_inference_with_fps_overlay(
             iou_thres=IOU_THRESHOLD,
         )
 
+        show_fps = ema_fps is not None and timed_batches > OVERLAY_FPS_DISPLAY_SKIP
+        fps_label = f"FPS: {ema_fps:.1f}" if show_fps else None
+
         for j in range(actual_bs):
             idx = batch_start + j
             ann = annotate_frame(
@@ -447,11 +451,9 @@ def run_video_inference_with_fps_overlay(
                 bundle.names,
                 shapes[idx],
             )
+            if fps_label is not None:
+                ann = _overlay_text_bottom_left(ann, fps_label)
             annotated.append(ann)
-
-    if ema_fps is not None and timed_batches > OVERLAY_FPS_DISPLAY_SKIP:
-        label = f"FPS: {ema_fps:.1f}"
-        annotated = [_overlay_text_bottom_left(f, label) for f in annotated]
 
     return annotated
 

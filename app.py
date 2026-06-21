@@ -290,7 +290,7 @@ with gr.Blocks(
 
 Compare **YOLOv8n** side by side: **Eager** (left) vs an optimized mode (right).
 
-**On-video FPS** is batched forward throughput (batch {OVERLAY_FPS_BATCH_SIZE}, smoothed EMA) — same methodology as the CUDA benchmarks, not per-frame batch-1 latency.
+**On-video FPS** is batched forward throughput (batch {OVERLAY_FPS_BATCH_SIZE}, EMA updates each batch).
 
 {_device_label()} · Model: `{MODEL_WEIGHT}` · Up to {MAX_DEMO_SECONDS:.0f}s per clip
 
