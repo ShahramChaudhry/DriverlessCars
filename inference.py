@@ -300,6 +300,23 @@ def _forward(bundle: ModelBundle, tensor: torch.Tensor) -> torch.Tensor:
     return out[0] if isinstance(out, (list, tuple)) else out
 
 
+def _forward_timed(bundle: ModelBundle, tensor: torch.Tensor) -> tuple[torch.Tensor, float]:
+    """Forward pass + elapsed seconds (CUDA events on GPU; no pre-sync)."""
+    if DEVICE.type == "cuda":
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        pred = _forward(bundle, tensor)
+        end.record()
+        torch.cuda.synchronize()
+        dt = max(start.elapsed_time(end) / 1000.0, 1e-9)
+        return pred, dt
+
+    t0 = time.perf_counter()
+    pred = _forward(bundle, tensor)
+    return pred, max(time.perf_counter() - t0, 1e-9)
+
+
 # ── Annotation ────────────────────────────────────────────────────────────────
 
 def annotate_frame(
@@ -414,6 +431,9 @@ def run_video_inference_with_fps_overlay(
     n = len(tensors)
     fps_batch_size = max(1, min(int(fps_batch_size), n))
 
+    if DEVICE.type == "cuda":
+        torch.cuda.synchronize()
+
     for batch_start in range(0, n, fps_batch_size):
         batch_end = min(batch_start + fps_batch_size, n)
         batch_tensors = torch.cat(tensors[batch_start:batch_end], dim=0)
@@ -421,13 +441,7 @@ def run_video_inference_with_fps_overlay(
         measure = batch_start >= n_untimed
 
         if measure:
-            if DEVICE.type == "cuda":
-                torch.cuda.synchronize()
-            t0 = time.perf_counter()
-            pred = _forward(bundle, batch_tensors)
-            if DEVICE.type == "cuda":
-                torch.cuda.synchronize()
-            dt = max(time.perf_counter() - t0, 1e-9)
+            pred, dt = _forward_timed(bundle, batch_tensors)
             batch_fps = actual_bs / dt
             ema_fps = batch_fps if ema_fps is None else (0.8 * ema_fps + 0.2 * batch_fps)
             timed_batches += 1
